@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-depth:     14 29 39;
+  --color-surface:   22 41 58;
+  --color-ink:       237 232 226;
+  --color-mist:      37 32 32;
+  --color-panel:     rgba(255,255,255,0.06);
+  --color-panel-mid: rgba(255,255,255,0.10);
+  --color-panel-hi:  rgba(255,255,255,0.16);
+  --color-rim:       rgba(255,255,255,0.08);
+  color: rgb(var(--color-ink));
+  background: rgb(var(--color-depth));
+  font-family: "Avenir Next", "Trebuchet MS", sans-serif;
+}
+
+:root.light {
+  --color-depth:     245 241 236;
+  --color-surface:   255 255 255;
+  --color-ink:       28 26 24;
+  --color-mist:      232 228 222;
+  --color-panel:     rgba(0,0,0,0.04);
+  --color-panel-mid: rgba(0,0,0,0.07);
+  --color-panel-hi:  rgba(0,0,0,0.12);
+  --color-rim:       rgba(0,0,0,0.10);
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  color: rgb(var(--color-ink));
+  background: rgb(var(--color-depth));
+}
+
+#root {
+  min-height: 100vh;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+@layer components {
+  .card {
+    @apply rounded-3xl border border-rim bg-surface p-5 shadow-card backdrop-blur-sm;
+  }
+
+  .button-primary {
+    @apply inline-flex items-center justify-center rounded-full bg-accent px-4 py-3 text-sm font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:bg-slate-600;
+  }
+
+  .button-secondary {
+    @apply inline-flex items-center justify-center rounded-full border border-ink/20 bg-panel px-4 py-3 text-sm font-semibold text-ink transition hover:bg-panel-hi hover:text-ink;
+  }
+}

@@ -1,0 +1,38 @@
+cervical_rotation:
+  chin_midline_clearance_ratio_min: 0.11
+  shoulder_drift_ratio_max: 0.08
+  forward_head_ratio_max: 0.23
+  neck_path_deviation_ratio_max: 0.09
+  excessive_effort_ratio_max: 0.85
+
+trunk_rotation:
+  rotation_angle_min_degrees: 45
+  lower_extremity_movement_ratio_max: 0.16
+  spine_pelvis_deviation_ratio_max: 0.12
+  cervical_motion_ratio_max: 0.42
+  excessive_effort_ratio_max: 0.85
+
+forward_lunge:
+  back_knee_depth_ratio_min: 0.18
+  upright_posture_ratio_min: 0.74
+  knee_tracking_ratio_min: 0.68
+  front_foot_flatness_ratio_min: 0.78
+  body_control_ratio_min: 0.7
+  excessive_effort_ratio_max: 0.85
+
+single_leg_dip:
+  balance_loss_ratio_max: 0.2
+  body_rotation_ratio_max: 0.18
+  foot_collapse_ratio_max: 0.15
+  knee_collapse_ratio_max: 0.18
+  hip_level_ratio_min: 0.78
+  excessive_effort_ratio_max: 0.85
+
+shoulder_reach_behind_back:
+  hand_distance_ratio_max: 0.42
+  bottom_hand_reach_ratio_min: 0.58
+  top_hand_midline_ratio_min: 0.68
+  lateral_flexion_ratio_max: 0.14
+  rounded_shoulder_ratio_max: 0.2
+  finger_walk_ratio_max: 0.16
+

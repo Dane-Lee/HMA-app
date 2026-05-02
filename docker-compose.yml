@@ -1,0 +1,17 @@
+services:
+  hma:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "443:443"
+    volumes:
+      - hma_data:/app/data
+      - hma_certs:/app/certs
+    env_file:
+      - .env
+    restart: unless-stopped
+
+volumes:
+  hma_data:
+  hma_certs:

@@ -1,0 +1,15 @@
+{
+  "name": "HMA Mobile Capture",
+  "short_name": "HMA Capture",
+  "start_url": "/mobile-capture",
+  "display": "standalone",
+  "background_color": "#0e1d27",
+  "theme_color": "#0e1d27",
+  "icons": [
+    {
+      "src": "/ati-logo/ATI-logo.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    }
+  ]
+}
