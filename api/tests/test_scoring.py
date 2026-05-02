@@ -19,4 +19,6 @@ def test_cervical_rotation_good_fixture_scores_higher(tmp_path: Path):
 
     assert good.score >= poor.score
     assert good.metrics["chin_midline_clearance_ratio"] >= poor.metrics["chin_midline_clearance_ratio"]
-
+    assert good.pose_trace is None
+    assert good.quality.overlay_available is False
+    assert good.quality.status == "unavailable"

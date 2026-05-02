@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -78,6 +79,8 @@ def _draft_capture_response(record: dict, request: Request) -> DraftCaptureRespo
         confidence=record["confidence"],
         metrics=record["metrics"],
         source=record["source"],
+        pose_trace=record.get("pose_trace"),
+        quality=record.get("quality"),
         original_filename=record["original_filename"],
         content_type=record["content_type"],
         file_size_bytes=record["file_size_bytes"],
@@ -255,6 +258,8 @@ async def score_capture(
             confidence=result.confidence,
             metrics=result.metrics,
             source=result.source,
+            pose_trace=asdict(result.pose_trace) if result.pose_trace else None,
+            quality=asdict(result.quality),
         )
     finally:
         await video.close()
@@ -338,6 +343,8 @@ async def upload_draft_capture(
             score=result.score,
             detected_faults=result.detected_faults,
             metrics=result.metrics,
+            pose_trace=asdict(result.pose_trace) if result.pose_trace else None,
+            quality=asdict(result.quality),
             confidence=result.confidence,
             source=result.source,
             original_filename=video.filename,
@@ -459,6 +466,8 @@ def finalize_movement(
     else:
         worse = payload.left
     app_metrics = worse.metrics if worse and worse.metrics else None
+    pose_trace = worse.pose_trace if worse and worse.pose_trace else None
+    quality = worse.quality if worse and worse.quality else None
 
     runtime.repository.upsert_movement_result(
         assessment_id=assessment_id,
@@ -468,6 +477,8 @@ def finalize_movement(
         final_score=min(provided_scores),
         detected_faults=detected_faults,
         app_metrics=app_metrics,
+        pose_trace=pose_trace.model_dump() if hasattr(pose_trace, "model_dump") else pose_trace,
+        quality=quality.model_dump() if hasattr(quality, "model_dump") else quality,
     )
     runtime.repository.log_audit_event(
         "movement_finalize",

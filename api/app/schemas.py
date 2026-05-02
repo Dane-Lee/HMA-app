@@ -9,6 +9,47 @@ from pydantic import BaseModel, Field, field_validator
 Side = Literal["left", "right"]
 
 
+class PoseLandmarkResponse(BaseModel):
+    name: str
+    x: float
+    y: float
+    z: float
+    visibility: float
+
+
+class PoseFrameResponse(BaseModel):
+    time_seconds: float
+    landmarks: list[PoseLandmarkResponse]
+
+
+class PoseTraceResponse(BaseModel):
+    schema_version: int = 1
+    source: str
+    movement_key: str
+    side: Side
+    width: int
+    height: int
+    fps: float
+    duration_seconds: float
+    sampled_frames: int
+    frames: list[PoseFrameResponse] = Field(default_factory=list)
+
+
+class CaptureQualityResponse(BaseModel):
+    schema_version: int = 1
+    status: Literal["good", "warning", "unavailable"] = "unavailable"
+    overlay_available: bool = False
+    source: str = "legacy"
+    sampled_frames: int = 0
+    detection_rate: float = 0.0
+    required_landmark_visibility: dict[str, float] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=lambda: ["legacy_capture_no_pose_quality"])
+    width: int = 0
+    height: int = 0
+    fps: float = 0.0
+    duration_seconds: float = 0.0
+
+
 class ConsentRequest(BaseModel):
     notice_version: str = Field(min_length=1, max_length=80)
     voluntary_wellness: Literal[True]
@@ -46,6 +87,8 @@ class CaptureResponse(BaseModel):
     confidence: float
     metrics: dict[str, float] = Field(default_factory=dict)
     source: str
+    pose_trace: PoseTraceResponse | None = None
+    quality: CaptureQualityResponse = Field(default_factory=CaptureQualityResponse)
 
 
 class DraftCaptureResponse(CaptureResponse):
@@ -65,6 +108,8 @@ class CaptureFinalizePayload(BaseModel):
     score: int = Field(ge=0, le=3)
     detected_faults: list[str] = Field(default_factory=list)
     metrics: dict[str, float] = Field(default_factory=dict)
+    pose_trace: PoseTraceResponse | None = None
+    quality: CaptureQualityResponse | None = None
 
 
 class FinalizeMovementRequest(BaseModel):
@@ -81,6 +126,8 @@ class MovementResultResponse(BaseModel):
     final_score: int
     detected_faults: dict[str, list[str]]
     app_metrics: dict[str, float] | None = None
+    pose_trace: PoseTraceResponse | None = None
+    quality: CaptureQualityResponse | None = None
     provider_score: int | None = None
     provider_note: str | None = None
     review_status: str = "unreviewed"

@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
+import { CaptureQualityNotice } from "../components/CaptureQualityNotice";
+import { PoseOverlayViewer } from "../components/PoseOverlayViewer";
 import { ThresholdBar } from "../components/ThresholdBar";
 import { deleteAssessment, getAssessment, getThresholds, listMovements, submitReview } from "../lib/api";
 import { bandTone, formatTimestamp, prettyFault } from "../lib/formatters";
@@ -291,6 +293,18 @@ export function AssessmentResultsPage() {
                   </div>
                 </div>
               ) : null}
+
+              <div className="mt-4 grid gap-3">
+                <CaptureQualityNotice quality={result.quality} />
+                <PoseOverlayViewer
+                  detectedFaults={result.detected_faults.summary ?? []}
+                  metrics={result.app_metrics}
+                  movementKey={result.movement_key}
+                  poseTrace={result.pose_trace}
+                  thresholds={movementThresholds}
+                  title={`${movementMap.get(result.movement_key) ?? result.movement_key} explanation`}
+                />
+              </div>
 
               {/* Review actions */}
               <div className="mt-4">

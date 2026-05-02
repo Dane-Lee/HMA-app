@@ -137,6 +137,9 @@ def test_mobile_capture_draft_upload_is_persisted_and_idempotent(tmp_path: Path)
     assert capture["side"] == "right"
     assert capture["client_capture_id"] == "client-clip-1"
     assert capture["video_url"]
+    assert capture["pose_trace"] is None
+    assert capture["quality"]["overlay_available"] is False
+    assert capture["quality"]["status"] == "unavailable"
     assert len(list(settings.draft_capture_dir.iterdir())) == 1
 
     duplicate_response = client.post(
@@ -155,9 +158,68 @@ def test_mobile_capture_draft_upload_is_persisted_and_idempotent(tmp_path: Path)
     list_response = client.get(f"/api/assessments/{assessment['id']}/draft-captures")
     assert list_response.status_code == 200
     assert len(list_response.json()) == 1
+    assert list_response.json()[0]["quality"]["source"] == "fallback"
 
     video_response = client.get(capture["video_url"])
     assert video_response.status_code == 200
+
+
+def test_finalize_persists_pose_trace_and_quality(tmp_path: Path):
+    client = TestClient(create_app(build_settings(tmp_path)))
+    assessment = client.post("/api/assessments", json=create_payload("Jordan")).json()
+    pose_trace = {
+        "schema_version": 1,
+        "source": "mediapipe",
+        "movement_key": "trunk_rotation",
+        "side": "right",
+        "width": 640,
+        "height": 360,
+        "fps": 30.0,
+        "duration_seconds": 2.0,
+        "sampled_frames": 1,
+        "frames": [
+            {
+                "time_seconds": 0.0,
+                "landmarks": [
+                    {"name": "left_shoulder", "x": 0.4, "y": 0.3, "z": 0.0, "visibility": 0.9},
+                    {"name": "right_shoulder", "x": 0.6, "y": 0.3, "z": 0.0, "visibility": 0.9},
+                ],
+            }
+        ],
+    }
+    quality = {
+        "schema_version": 1,
+        "status": "good",
+        "overlay_available": True,
+        "source": "mediapipe",
+        "sampled_frames": 1,
+        "detection_rate": 1.0,
+        "required_landmark_visibility": {"left_shoulder": 0.9, "right_shoulder": 0.9},
+        "warnings": [],
+        "width": 640,
+        "height": 360,
+        "fps": 30.0,
+        "duration_seconds": 2.0,
+    }
+
+    response = client.post(
+        f"/api/assessments/{assessment['id']}/movements/trunk_rotation/finalize",
+        json={
+            "right": {
+                "score": 2,
+                "detected_faults": ["lower_extremity_movement"],
+                "metrics": {"trunk_rotation_angle_degrees": 42.0},
+                "pose_trace": pose_trace,
+                "quality": quality,
+            },
+            "left": {"score": 3, "detected_faults": [], "metrics": {}},
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()["movement_results"][0]
+    assert result["pose_trace"]["frames"][0]["landmarks"][0]["name"] == "left_shoulder"
+    assert result["quality"]["overlay_available"] is True
 
 
 def test_expired_draft_video_is_deleted_but_score_remains(tmp_path: Path):

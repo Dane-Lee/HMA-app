@@ -35,5 +35,6 @@ class MovementScorer(ABC):
             confidence=round(confidence, 2),
             metrics=metrics,
             source=extraction.source,
+            pose_trace=extraction.pose_trace,
+            quality=extraction.quality,
         )
-

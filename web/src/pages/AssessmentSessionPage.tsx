@@ -116,14 +116,18 @@ export function AssessmentSessionPage() {
       payload.right = {
         score: captures.right.score,
         detected_faults: captures.right.detected_faults,
-        metrics: captures.right.metrics
+        metrics: captures.right.metrics,
+        pose_trace: captures.right.pose_trace ?? null,
+        quality: captures.right.quality
       };
     }
     if (captures.left) {
       payload.left = {
         score: captures.left.score,
         detected_faults: captures.left.detected_faults,
-        metrics: captures.left.metrics
+        metrics: captures.left.metrics,
+        pose_trace: captures.left.pose_trace ?? null,
+        quality: captures.left.quality
       };
     }
     const hasAllRequiredSides = selectedMovement.sides.every((side) => captures[side]);

@@ -13,9 +13,18 @@ logger = logging.getLogger(__name__)
 
 
 class ScoringService:
-    def __init__(self, thresholds_path: Path) -> None:
+    def __init__(
+        self,
+        thresholds_path: Path,
+        *,
+        enable_pose_overlays: bool = True,
+        max_pose_trace_frames: int = 48,
+    ) -> None:
         self.thresholds = yaml.safe_load(thresholds_path.read_text(encoding="utf-8"))
-        self.extractor = HybridFeatureExtractor()
+        self.extractor = HybridFeatureExtractor(
+            enable_pose_overlays=enable_pose_overlays,
+            max_pose_trace_frames=max_pose_trace_frames,
+        )
         self.scorers = get_movement_scorers()
 
     def analyze_capture(self, movement_key: str, side: str, video_path: Path) -> CaptureScore:

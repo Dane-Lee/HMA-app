@@ -24,6 +24,56 @@ export type CaptureResult = {
   confidence: number;
   metrics: Record<string, number>;
   source: string;
+  pose_trace?: PoseTrace | null;
+  quality?: CaptureQuality;
+};
+
+export type PoseLandmark = {
+  name: string;
+  x: number;
+  y: number;
+  z: number;
+  visibility: number;
+};
+
+export type PoseFrame = {
+  time_seconds: number;
+  landmarks: PoseLandmark[];
+};
+
+export type PoseTrace = {
+  schema_version: number;
+  source: string;
+  movement_key: string;
+  side: Side;
+  width: number;
+  height: number;
+  fps: number;
+  duration_seconds: number;
+  sampled_frames: number;
+  frames: PoseFrame[];
+};
+
+export type CaptureQuality = {
+  schema_version: number;
+  status: "good" | "warning" | "unavailable";
+  overlay_available: boolean;
+  source: string;
+  sampled_frames: number;
+  detection_rate: number;
+  required_landmark_visibility: Record<string, number>;
+  warnings: string[];
+  width: number;
+  height: number;
+  fps: number;
+  duration_seconds: number;
+};
+
+export type OverlayAnnotation = {
+  label: string;
+  detail: string;
+  tone: "good" | "warning" | "fault" | "neutral";
+  landmarkNames?: string[];
 };
 
 export type DraftCapture = CaptureResult & {
@@ -44,11 +94,15 @@ export type FinalizePayload = {
     score: number;
     detected_faults: string[];
     metrics?: Record<string, number>;
+    pose_trace?: PoseTrace | null;
+    quality?: CaptureQuality;
   };
   right?: {
     score: number;
     detected_faults: string[];
     metrics?: Record<string, number>;
+    pose_trace?: PoseTrace | null;
+    quality?: CaptureQuality;
   };
 };
 
@@ -61,6 +115,8 @@ export type MovementResult = {
   final_score: number;
   detected_faults: Record<string, string[]>;
   app_metrics: Record<string, number> | null;
+  pose_trace?: PoseTrace | null;
+  quality?: CaptureQuality | null;
   provider_score: number | null;
   provider_note: string | null;
   review_status: "unreviewed" | "reviewed";

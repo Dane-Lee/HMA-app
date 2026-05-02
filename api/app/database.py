@@ -28,6 +28,8 @@ CREATE TABLE IF NOT EXISTS movement_results (
     left_score INTEGER,
     final_score INTEGER NOT NULL,
     detected_faults_json TEXT NOT NULL,
+    pose_trace_json TEXT,
+    quality_json TEXT,
     FOREIGN KEY (assessment_id) REFERENCES assessments(id) ON DELETE CASCADE,
     UNIQUE (assessment_id, movement_key)
 );
@@ -41,6 +43,8 @@ CREATE TABLE IF NOT EXISTS draft_captures (
     score INTEGER NOT NULL,
     detected_faults_json TEXT NOT NULL,
     metrics_json TEXT NOT NULL,
+    pose_trace_json TEXT,
+    quality_json TEXT,
     confidence REAL NOT NULL,
     source TEXT NOT NULL,
     original_filename TEXT,
@@ -130,9 +134,17 @@ ASSESSMENT_MIGRATIONS: list[tuple[str, str]] = [
 
 MOVEMENT_RESULTS_MIGRATIONS: list[tuple[str, str]] = [
     ("app_metrics_json", "TEXT"),
+    ("pose_trace_json", "TEXT"),
+    ("quality_json", "TEXT"),
     ("provider_score", "INTEGER"),
     ("provider_note", "TEXT"),
     ("review_status", "TEXT NOT NULL DEFAULT 'unreviewed'"),
+]
+
+
+DRAFT_CAPTURES_MIGRATIONS: list[tuple[str, str]] = [
+    ("pose_trace_json", "TEXT"),
+    ("quality_json", "TEXT"),
 ]
 
 
@@ -158,6 +170,15 @@ def _run_column_migrations(db_path: Path) -> None:
             try:
                 connection.execute(
                     f"ALTER TABLE movement_results ADD COLUMN {column_name} {column_def}"
+                )
+                connection.commit()
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
+        for column_name, column_def in DRAFT_CAPTURES_MIGRATIONS:
+            try:
+                connection.execute(
+                    f"ALTER TABLE draft_captures ADD COLUMN {column_name} {column_def}"
                 )
                 connection.commit()
             except sqlite3.OperationalError as exc:

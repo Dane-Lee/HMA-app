@@ -23,6 +23,8 @@ class AppSettings:
     magic_link_lifetime_days: int = 7
     employee_session_hours: int = 12
     public_base_url: str = "http://localhost:5181"
+    enable_pose_overlays: bool = True
+    max_pose_trace_frames: int = 48
     dev_cors_origins: tuple[str, ...] = ("http://localhost:5181", "http://127.0.0.1:5181")
 
 
@@ -53,6 +55,13 @@ def get_settings() -> AppSettings:
     magic_link_lifetime_days = int(os.environ.get("MAGIC_LINK_LIFETIME_DAYS", "7"))
     employee_session_hours = int(os.environ.get("EMPLOYEE_SESSION_HOURS", "12"))
     public_base_url = os.environ.get("PUBLIC_BASE_URL", "http://localhost:5181").strip().rstrip("/")
+    enable_pose_overlays = os.environ.get("ENABLE_POSE_OVERLAYS", "1").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+    max_pose_trace_frames = int(os.environ.get("MAX_POSE_TRACE_FRAMES", "48"))
     return AppSettings(
         base_dir=base_dir,
         db_path=data_dir / "hma.db",
@@ -68,4 +77,6 @@ def get_settings() -> AppSettings:
         magic_link_lifetime_days=magic_link_lifetime_days,
         employee_session_hours=employee_session_hours,
         public_base_url=public_base_url,
+        enable_pose_overlays=enable_pose_overlays,
+        max_pose_trace_frames=max_pose_trace_frames,
     )

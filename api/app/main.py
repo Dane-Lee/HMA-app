@@ -45,7 +45,11 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         settings=settings,
         repository=AssessmentRepository(settings.db_path),
         catalog=MovementCatalog(settings.movements_config_path),
-        scoring_service=ScoringService(settings.thresholds_path),
+        scoring_service=ScoringService(
+            settings.thresholds_path,
+            enable_pose_overlays=settings.enable_pose_overlays,
+            max_pose_trace_frames=settings.max_pose_trace_frames,
+        ),
     )
     app.state.runtime = runtime
     app.include_router(auth_router)

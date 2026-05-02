@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 
 @dataclass(slots=True)
@@ -48,10 +49,57 @@ class MovementFeatures:
 
 
 @dataclass(slots=True)
+class PoseLandmark:
+    name: str
+    x: float
+    y: float
+    z: float
+    visibility: float
+
+
+@dataclass(slots=True)
+class PoseFrame:
+    time_seconds: float
+    landmarks: list[PoseLandmark]
+
+
+@dataclass(slots=True)
+class PoseTrace:
+    schema_version: int
+    source: str
+    movement_key: str
+    side: str
+    width: int
+    height: int
+    fps: float
+    duration_seconds: float
+    sampled_frames: int
+    frames: list[PoseFrame]
+
+
+@dataclass(slots=True)
+class CaptureQuality:
+    schema_version: int
+    status: Literal["good", "warning", "unavailable"]
+    overlay_available: bool
+    source: str
+    sampled_frames: int
+    detection_rate: float
+    required_landmark_visibility: dict[str, float]
+    warnings: list[str]
+    width: int
+    height: int
+    fps: float
+    duration_seconds: float
+
+
+@dataclass(slots=True)
 class ExtractionResult:
     context: VideoContext
     features: MovementFeatures
     source: str
+    pose_trace: PoseTrace | None
+    quality: CaptureQuality
 
 
 @dataclass(slots=True)
@@ -63,4 +111,5 @@ class CaptureScore:
     confidence: float
     metrics: dict[str, float]
     source: str
-
+    pose_trace: PoseTrace | None
+    quality: CaptureQuality

@@ -5,7 +5,15 @@ import math
 from dataclasses import dataclass
 from pathlib import Path
 
-from .types import ExtractionResult, MovementFeatures, VideoContext
+from .types import (
+    CaptureQuality,
+    ExtractionResult,
+    MovementFeatures,
+    PoseFrame,
+    PoseLandmark,
+    PoseTrace,
+    VideoContext,
+)
 
 try:
     import cv2  # type: ignore
@@ -34,6 +42,8 @@ def _safe_span(values: list[float], default: float = 0.0) -> float:
 
 @dataclass(slots=True)
 class FramePose:
+    timestamp_seconds: float
+    landmarks: dict[str, PoseLandmark]
     nose_x: float
     nose_y: float
     nose_z: float
@@ -70,6 +80,10 @@ class FramePose:
 
 
 class HybridFeatureExtractor:
+    def __init__(self, *, enable_pose_overlays: bool = True, max_pose_trace_frames: int = 48) -> None:
+        self.enable_pose_overlays = enable_pose_overlays
+        self.max_pose_trace_frames = max(1, max_pose_trace_frames)
+
     def extract(self, video_path: Path, movement_key: str, side: str) -> ExtractionResult:
         context = self._build_context(video_path, movement_key, side)
         if cv2 is not None and mp is not None and np is not None:
@@ -120,6 +134,7 @@ class HybridFeatureExtractor:
         frames: list[FramePose] = []
         index = 0
         sample_every = max(1, int((context.fps or 24) // 6))
+        sampled_attempts = 0
         try:
             while capture.isOpened():
                 success, frame = capture.read()
@@ -128,10 +143,12 @@ class HybridFeatureExtractor:
                 if index % sample_every != 0:
                     index += 1
                     continue
+                sampled_attempts += 1
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 results = pose.process(rgb)
                 if results.pose_landmarks:
-                    frames.append(self._map_pose(results.pose_landmarks.landmark))
+                    timestamp_seconds = index / (context.fps or 24.0)
+                    frames.append(self._map_pose(results.pose_landmarks.landmark, timestamp_seconds))
                 index += 1
         finally:
             capture.release()
@@ -141,11 +158,37 @@ class HybridFeatureExtractor:
             raise RuntimeError("Insufficient pose frames extracted.")
 
         features = self._derive_features(frames, context)
-        return ExtractionResult(context=context, features=features, source="mediapipe")
+        pose_trace = self._build_pose_trace(frames, context) if self.enable_pose_overlays else None
+        quality = self._build_capture_quality(
+            frames,
+            context,
+            source="mediapipe",
+            sampled_attempts=sampled_attempts,
+            overlay_available=pose_trace is not None,
+        )
+        return ExtractionResult(
+            context=context,
+            features=features,
+            source="mediapipe",
+            pose_trace=pose_trace,
+            quality=quality,
+        )
 
-    def _map_pose(self, landmarks) -> FramePose:
+    def _map_pose(self, landmarks, timestamp_seconds: float) -> FramePose:
         pose_landmarks = mp.solutions.pose.PoseLandmark
+        mapped_landmarks = {
+            landmark.name.lower(): PoseLandmark(
+                name=landmark.name.lower(),
+                x=round(float(landmarks[landmark].x), 5),
+                y=round(float(landmarks[landmark].y), 5),
+                z=round(float(landmarks[landmark].z), 5),
+                visibility=round(float(landmarks[landmark].visibility), 5),
+            )
+            for landmark in pose_landmarks
+        }
         return FramePose(
+            timestamp_seconds=round(timestamp_seconds, 3),
+            landmarks=mapped_landmarks,
             nose_x=landmarks[pose_landmarks.NOSE].x,
             nose_y=landmarks[pose_landmarks.NOSE].y,
             nose_z=landmarks[pose_landmarks.NOSE].z,
@@ -179,6 +222,88 @@ class HybridFeatureExtractor:
             right_wrist_x=landmarks[pose_landmarks.RIGHT_WRIST].x,
             left_wrist_y=landmarks[pose_landmarks.LEFT_WRIST].y,
             right_wrist_y=landmarks[pose_landmarks.RIGHT_WRIST].y,
+        )
+
+    def _build_pose_trace(self, frames: list[FramePose], context: VideoContext) -> PoseTrace | None:
+        if not frames:
+            return None
+        step = max(1, math.ceil(len(frames) / self.max_pose_trace_frames))
+        capped_frames = frames[::step][: self.max_pose_trace_frames]
+        return PoseTrace(
+            schema_version=1,
+            source="mediapipe",
+            movement_key=context.movement_key,
+            side=context.side,
+            width=context.width,
+            height=context.height,
+            fps=round(context.fps, 3),
+            duration_seconds=context.duration_seconds,
+            sampled_frames=len(frames),
+            frames=[
+                PoseFrame(
+                    time_seconds=frame.timestamp_seconds,
+                    landmarks=list(frame.landmarks.values()),
+                )
+                for frame in capped_frames
+            ],
+        )
+
+    def _build_capture_quality(
+        self,
+        frames: list[FramePose],
+        context: VideoContext,
+        *,
+        source: str,
+        sampled_attempts: int,
+        overlay_available: bool,
+    ) -> CaptureQuality:
+        required_names = [
+            "nose",
+            "left_shoulder",
+            "right_shoulder",
+            "left_hip",
+            "right_hip",
+            "left_knee",
+            "right_knee",
+            "left_ankle",
+            "right_ankle",
+            "left_wrist",
+            "right_wrist",
+        ]
+        visibility = {
+            name: round(
+                _safe_mean([frame.landmarks[name].visibility for frame in frames if name in frame.landmarks]),
+                3,
+            )
+            for name in required_names
+        }
+        detection_rate = round(len(frames) / max(sampled_attempts, 1), 3)
+        warnings: list[str] = []
+        if not self.enable_pose_overlays:
+            warnings.append("pose_overlays_disabled")
+        if detection_rate < 0.75:
+            warnings.append("low_pose_detection_rate")
+        if len(frames) < 8:
+            warnings.append("limited_pose_samples")
+        if context.width <= 0 or context.height <= 0:
+            warnings.append("missing_video_dimensions")
+        low_visibility = [name for name, value in visibility.items() if value < 0.5]
+        if low_visibility:
+            warnings.append("low_required_landmark_visibility")
+        status = "good" if overlay_available and not warnings else "warning"
+        return CaptureQuality(
+            schema_version=1,
+            status=status,
+            overlay_available=overlay_available,
+            source=source,
+            sampled_frames=len(frames),
+            detection_rate=detection_rate,
+            required_landmark_visibility=visibility,
+            warnings=warnings,
+            width=context.width,
+            height=context.height,
+            fps=round(context.fps, 3),
+            duration_seconds=context.duration_seconds,
         )
 
     def _derive_features(self, frames: list[FramePose], context: VideoContext) -> MovementFeatures:
@@ -481,5 +606,23 @@ class HybridFeatureExtractor:
             "excessive_effort_ratio": round(features.excessive_effort_ratio, 3),
             "body_control_ratio": round(features.body_control_ratio, 3),
         }
-        return ExtractionResult(context=context, features=features, source="fallback")
-
+        return ExtractionResult(
+            context=context,
+            features=features,
+            source="fallback",
+            pose_trace=None,
+            quality=CaptureQuality(
+                schema_version=1,
+                status="unavailable",
+                overlay_available=False,
+                source="fallback",
+                sampled_frames=0,
+                detection_rate=0.0,
+                required_landmark_visibility={},
+                warnings=["pose_overlay_unavailable_for_fallback_scoring"],
+                width=context.width,
+                height=context.height,
+                fps=round(context.fps, 3),
+                duration_seconds=context.duration_seconds,
+            ),
+        )

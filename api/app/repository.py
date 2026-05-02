@@ -13,6 +13,23 @@ from .database import get_connection
 PRIVACY_POSTURE = "voluntary_ergonomic_wellness"
 
 
+def default_capture_quality() -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "status": "unavailable",
+        "overlay_available": False,
+        "source": "legacy",
+        "sampled_frames": 0,
+        "detection_rate": 0.0,
+        "required_landmark_visibility": {},
+        "warnings": ["legacy_capture_no_pose_quality"],
+        "width": 0,
+        "height": 0,
+        "fps": 0.0,
+        "duration_seconds": 0.0,
+    }
+
+
 def compute_score_band(total_score: int) -> str:
     if total_score <= 5:
         return "High opportunity for improvement"
@@ -118,7 +135,8 @@ class AssessmentRepository:
             movement_rows = connection.execute(
                 """
                 SELECT id, assessment_id, movement_key, right_score, left_score, final_score,
-                       detected_faults_json, app_metrics_json, provider_score, provider_note, review_status
+                       detected_faults_json, app_metrics_json, pose_trace_json, quality_json,
+                       provider_score, provider_note, review_status
                 FROM movement_results
                 WHERE assessment_id = ?
                 ORDER BY movement_key
@@ -133,6 +151,8 @@ class AssessmentRepository:
                 **dict(row),
                 "detected_faults": json.loads(row["detected_faults_json"]),
                 "app_metrics": json.loads(row["app_metrics_json"]) if row["app_metrics_json"] else None,
+                "pose_trace": json.loads(row["pose_trace_json"]) if row["pose_trace_json"] else None,
+                "quality": json.loads(row["quality_json"]) if row["quality_json"] else default_capture_quality(),
             }
             for row in movement_rows
         ]
@@ -220,6 +240,8 @@ class AssessmentRepository:
         final_score: int,
         detected_faults: dict[str, list[str]],
         app_metrics: dict[str, Any] | None = None,
+        pose_trace: dict[str, Any] | None = None,
+        quality: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         record = {
             "id": str(uuid4()),
@@ -230,6 +252,8 @@ class AssessmentRepository:
             "final_score": final_score,
             "detected_faults_json": json.dumps(detected_faults),
             "app_metrics_json": json.dumps(app_metrics) if app_metrics is not None else None,
+            "pose_trace_json": json.dumps(pose_trace) if pose_trace is not None else None,
+            "quality_json": json.dumps(quality) if quality is not None else None,
         }
         with get_connection(self.db_path) as connection:
             connection.execute(
@@ -242,7 +266,9 @@ class AssessmentRepository:
                     left_score,
                     final_score,
                     detected_faults_json,
-                    app_metrics_json
+                    app_metrics_json,
+                    pose_trace_json,
+                    quality_json
                 )
                 VALUES (
                     :id,
@@ -252,7 +278,9 @@ class AssessmentRepository:
                     :left_score,
                     :final_score,
                     :detected_faults_json,
-                    :app_metrics_json
+                    :app_metrics_json,
+                    :pose_trace_json,
+                    :quality_json
                 )
                 ON CONFLICT(assessment_id, movement_key)
                 DO UPDATE SET
@@ -260,7 +288,9 @@ class AssessmentRepository:
                     left_score = excluded.left_score,
                     final_score = excluded.final_score,
                     detected_faults_json = excluded.detected_faults_json,
-                    app_metrics_json = excluded.app_metrics_json
+                    app_metrics_json = excluded.app_metrics_json,
+                    pose_trace_json = excluded.pose_trace_json,
+                    quality_json = excluded.quality_json
                 """,
                 record,
             )
@@ -292,6 +322,8 @@ class AssessmentRepository:
             "final_score": final_score,
             "detected_faults": detected_faults,
             "app_metrics": app_metrics,
+            "pose_trace": pose_trace,
+            "quality": quality,
         }
 
     def save_provider_review(
@@ -381,6 +413,8 @@ class AssessmentRepository:
         score: int,
         detected_faults: list[str],
         metrics: dict[str, Any],
+        pose_trace: dict[str, Any] | None,
+        quality: dict[str, Any] | None,
         confidence: float,
         source: str,
         original_filename: str | None,
@@ -399,6 +433,8 @@ class AssessmentRepository:
             "score": score,
             "detected_faults_json": json.dumps(detected_faults),
             "metrics_json": json.dumps(metrics),
+            "pose_trace_json": json.dumps(pose_trace) if pose_trace is not None else None,
+            "quality_json": json.dumps(quality) if quality is not None else None,
             "confidence": confidence,
             "source": source,
             "original_filename": original_filename,
@@ -421,6 +457,8 @@ class AssessmentRepository:
                     score,
                     detected_faults_json,
                     metrics_json,
+                    pose_trace_json,
+                    quality_json,
                     confidence,
                     source,
                     original_filename,
@@ -440,6 +478,8 @@ class AssessmentRepository:
                     :score,
                     :detected_faults_json,
                     :metrics_json,
+                    :pose_trace_json,
+                    :quality_json,
                     :confidence,
                     :source,
                     :original_filename,
@@ -457,6 +497,8 @@ class AssessmentRepository:
                     score = excluded.score,
                     detected_faults_json = excluded.detected_faults_json,
                     metrics_json = excluded.metrics_json,
+                    pose_trace_json = excluded.pose_trace_json,
+                    quality_json = excluded.quality_json,
                     confidence = excluded.confidence,
                     source = excluded.source,
                     original_filename = excluded.original_filename,
@@ -519,6 +561,10 @@ class AssessmentRepository:
         record = dict(row)
         record["detected_faults"] = json.loads(record.pop("detected_faults_json"))
         record["metrics"] = json.loads(record.pop("metrics_json"))
+        pose_trace_json = record.pop("pose_trace_json", None)
+        quality_json = record.pop("quality_json", None)
+        record["pose_trace"] = json.loads(pose_trace_json) if pose_trace_json else None
+        record["quality"] = json.loads(quality_json) if quality_json else default_capture_quality()
         return record
 
     # ---- Employees ---------------------------------------------------------

@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
+import { CaptureQualityNotice } from "./CaptureQualityNotice";
+import { PoseOverlayViewer } from "./PoseOverlayViewer";
 import { prettyFault } from "../lib/formatters";
 import type { CaptureResult, DraftCapture, Side } from "../lib/types";
 
@@ -300,6 +302,18 @@ export function CaptureRecorder({
                     Mobile review video expired; analyzed scores are still available.
                   </p>
                 ) : null}
+
+                <div className="mt-4 grid gap-3">
+                  <CaptureQualityNotice quality={result?.quality ?? draftCapture?.quality} />
+                  <PoseOverlayViewer
+                    detectedFaults={result?.detected_faults ?? draftCapture?.detected_faults ?? []}
+                    metrics={result?.metrics ?? draftCapture?.metrics}
+                    movementKey={result?.movement_key ?? draftCapture?.movement_key ?? ""}
+                    poseTrace={result?.pose_trace ?? draftCapture?.pose_trace}
+                    title={`${sideLabel} overlay`}
+                    videoUrl={file ? filesBySide[side]?.previewUrl : draftCapture?.video_url}
+                  />
+                </div>
 
                 {result ? (
                   <div className="mt-4 rounded-2xl bg-panel p-4">
