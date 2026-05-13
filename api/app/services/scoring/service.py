@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from copy import deepcopy
 from pathlib import Path
 
 import yaml
@@ -20,12 +21,29 @@ class ScoringService:
         enable_pose_overlays: bool = True,
         max_pose_trace_frames: int = 48,
     ) -> None:
-        self.thresholds = yaml.safe_load(thresholds_path.read_text(encoding="utf-8"))
+        self.base_thresholds = yaml.safe_load(thresholds_path.read_text(encoding="utf-8"))
+        self.thresholds = deepcopy(self.base_thresholds)
         self.extractor = HybridFeatureExtractor(
             enable_pose_overlays=enable_pose_overlays,
             max_pose_trace_frames=max_pose_trace_frames,
         )
         self.scorers = get_movement_scorers()
+
+    def apply_threshold_overrides(self, overrides: dict[str, dict[str, float]]) -> None:
+        self.thresholds = deepcopy(self.base_thresholds)
+        for movement_key, movement_overrides in overrides.items():
+            if movement_key not in self.thresholds:
+                continue
+            for threshold_key, value in movement_overrides.items():
+                if threshold_key in self.thresholds[movement_key]:
+                    self.thresholds[movement_key][threshold_key] = value
+
+    def set_threshold_override(self, movement_key: str, threshold_key: str, value: float) -> None:
+        if movement_key not in self.thresholds:
+            raise KeyError(f"Unsupported movement '{movement_key}'.")
+        if threshold_key not in self.thresholds[movement_key]:
+            raise KeyError(f"Unsupported threshold '{threshold_key}'.")
+        self.thresholds[movement_key][threshold_key] = value
 
     def analyze_capture(self, movement_key: str, side: str, video_path: Path) -> CaptureScore:
         scorer = self.scorers.get(movement_key)

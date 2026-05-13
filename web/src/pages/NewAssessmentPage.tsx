@@ -3,10 +3,12 @@ import { useNavigate } from "react-router-dom";
 
 import { createAssessment } from "../lib/api";
 import { buildConsentPayload, PRIVACY_POSTURE_STATEMENT } from "../lib/privacy";
+import type { ScoringMode } from "../lib/types";
 
 export function NewAssessmentPage() {
   const navigate = useNavigate();
   const [name, setName] = useState("");
+  const [scoringMode, setScoringMode] = useState<ScoringMode>("ai_assisted");
   const [accepted, setAccepted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -16,7 +18,7 @@ export function NewAssessmentPage() {
     setError(null);
     setIsSaving(true);
     try {
-      const assessment = await createAssessment(name.trim(), buildConsentPayload());
+      const assessment = await createAssessment(name.trim(), buildConsentPayload(), scoringMode);
       navigate(`/assessments/${assessment.id}`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to create assessment.");
@@ -58,6 +60,34 @@ export function NewAssessmentPage() {
             value={name}
           />
         </label>
+
+        <fieldset className="grid gap-2">
+          <legend className="text-sm font-semibold">Scoring mode</legend>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {([
+              ["ai_assisted", "AI assisted", "Analyze captures and allow manual correction."],
+              ["manual", "Manual", "Enter provider scores for every movement."]
+            ] as const).map(([value, label, description]) => (
+              <label
+                className={`rounded-2xl border px-4 py-3 text-sm transition ${
+                  scoringMode === value
+                    ? "border-accent bg-mist text-ink"
+                    : "border-rim bg-panel text-ink/75"
+                }`}
+                key={value}
+              >
+                <input
+                  checked={scoringMode === value}
+                  className="sr-only"
+                  onChange={() => setScoringMode(value)}
+                  type="radio"
+                />
+                <span className="block font-semibold">{label}</span>
+                <span className="mt-1 block text-xs text-ink/55">{description}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
 
         <label className="flex items-start gap-3 rounded-2xl bg-panel px-4 py-4 text-sm text-ink/75">
           <input

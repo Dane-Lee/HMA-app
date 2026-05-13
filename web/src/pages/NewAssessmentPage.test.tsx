@@ -9,6 +9,7 @@ const apiMocks = vi.hoisted(() => ({
     id: "assessment-1",
     name: "Taylor",
     created_at: "2026-04-16T12:00:00Z",
+    scoring_mode: "ai_assisted",
     total_score: 0,
     score_band: "High opportunity for improvement",
     consent_notice_version: "hma-privacy-notice-v1",
@@ -49,7 +50,8 @@ describe("NewAssessmentPage", () => {
           purpose_limited: true,
           no_employment_decision: true,
           video_retention_acknowledged: true
-        })
+        }),
+        "ai_assisted"
       );
       expect(screen.getByText("session")).toBeInTheDocument();
     });

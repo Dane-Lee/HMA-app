@@ -41,15 +41,19 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     )
     app.add_middleware(PinAuthMiddleware)
 
+    repository = AssessmentRepository(settings.db_path)
+    scoring_service = ScoringService(
+        settings.thresholds_path,
+        enable_pose_overlays=settings.enable_pose_overlays,
+        max_pose_trace_frames=settings.max_pose_trace_frames,
+    )
+    scoring_service.apply_threshold_overrides(repository.get_active_threshold_overrides())
+
     runtime = RuntimeState(
         settings=settings,
-        repository=AssessmentRepository(settings.db_path),
+        repository=repository,
         catalog=MovementCatalog(settings.movements_config_path),
-        scoring_service=ScoringService(
-            settings.thresholds_path,
-            enable_pose_overlays=settings.enable_pose_overlays,
-            max_pose_trace_frames=settings.max_pose_trace_frames,
-        ),
+        scoring_service=scoring_service,
     )
     app.state.runtime = runtime
     app.include_router(auth_router)

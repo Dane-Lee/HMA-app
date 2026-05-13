@@ -4,12 +4,22 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { CaptureQualityNotice } from "../components/CaptureQualityNotice";
 import { PoseOverlayViewer } from "../components/PoseOverlayViewer";
 import { ThresholdBar } from "../components/ThresholdBar";
-import { deleteAssessment, getAssessment, getThresholds, listMovements, submitReview } from "../lib/api";
+import {
+  approveCalibrationSuggestion,
+  deleteAssessment,
+  getAssessment,
+  getThresholds,
+  listCalibrationSuggestions,
+  listMovements,
+  rejectCalibrationSuggestion,
+  submitReview
+} from "../lib/api";
 import { bandTone, formatTimestamp, prettyFault } from "../lib/formatters";
 import { MOVEMENT_CHECKS } from "../lib/movementChecks";
 import { PRIVACY_POSTURE_STATEMENT } from "../lib/privacy";
 import type {
   AssessmentDetail,
+  CalibrationSuggestion,
   MovementDefinition,
   MovementResult,
   ThresholdsMap,
@@ -29,16 +39,18 @@ export function AssessmentResultsPage() {
   const [assessment, setAssessment] = useState<AssessmentDetail | null>(null);
   const [movements, setMovements] = useState<MovementDefinition[]>([]);
   const [thresholds, setThresholds] = useState<ThresholdsMap>({});
+  const [calibrationSuggestions, setCalibrationSuggestions] = useState<CalibrationSuggestion[]>([]);
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, ReviewDraft>>({});
   const [error, setError] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
-    Promise.all([getAssessment(assessmentId), listMovements(), getThresholds()])
-      .then(([nextAssessment, nextMovements, nextThresholds]) => {
+    Promise.all([getAssessment(assessmentId), listMovements(), getThresholds(), listCalibrationSuggestions()])
+      .then(([nextAssessment, nextMovements, nextThresholds, nextSuggestions]) => {
         setAssessment(nextAssessment);
         setMovements(nextMovements);
         setThresholds(nextThresholds);
+        setCalibrationSuggestions(nextSuggestions);
       })
       .catch((reason: unknown) => {
         setError(reason instanceof Error ? reason.message : "Unable to load assessment results.");
@@ -71,7 +83,8 @@ export function AssessmentResultsPage() {
     setDraft(result.movement_key, { saving: true, saveError: null });
     try {
       const updated = await submitReview(assessmentId, result.movement_key, {
-        provider_score: result.final_score,
+        provider_score: result.app_score_available ? result.final_score : result.effective_final_score,
+        review_reason: "provider_confirm",
       });
       setAssessment(updated);
       setDraft(result.movement_key, { saving: false, open: false, saveError: null });
@@ -84,12 +97,13 @@ export function AssessmentResultsPage() {
   }
 
   async function handleSaveOverride(result: MovementResult) {
-    const draft = getDraft(result.movement_key, result.final_score);
+    const draft = getDraft(result.movement_key, result.effective_final_score);
     setDraft(result.movement_key, { saving: true, saveError: null });
     try {
       const updated = await submitReview(assessmentId, result.movement_key, {
         provider_score: draft.score,
         provider_note: draft.note.trim() || undefined,
+        review_reason: "provider_override",
       });
       setAssessment(updated);
       setDraft(result.movement_key, { saving: false, open: false, saveError: null });
@@ -98,6 +112,43 @@ export function AssessmentResultsPage() {
         saving: false,
         saveError: reason instanceof Error ? reason.message : "Unable to save override.",
       });
+    }
+  }
+
+  async function handleApproveSuggestion(suggestion: CalibrationSuggestion) {
+    setError(null);
+    try {
+      const response = await approveCalibrationSuggestion({
+        movement_key: suggestion.movement_key,
+        threshold_key: suggestion.threshold_key,
+        old_value: suggestion.current_value,
+        new_value: suggestion.suggested_value,
+        rationale: suggestion.rationale
+      });
+      setThresholds(response.thresholds);
+      setCalibrationSuggestions((current) =>
+        current.filter((item) => item.id !== suggestion.id)
+      );
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to approve calibration.");
+    }
+  }
+
+  async function handleRejectSuggestion(suggestion: CalibrationSuggestion) {
+    setError(null);
+    try {
+      await rejectCalibrationSuggestion({
+        movement_key: suggestion.movement_key,
+        threshold_key: suggestion.threshold_key,
+        old_value: suggestion.current_value,
+        new_value: suggestion.suggested_value,
+        rationale: suggestion.rationale
+      });
+      setCalibrationSuggestions((current) =>
+        current.filter((item) => item.id !== suggestion.id)
+      );
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to reject calibration.");
     }
   }
 
@@ -189,16 +240,73 @@ export function AssessmentResultsPage() {
         {error ? <p className="mt-3 text-sm text-rose-600">{error}</p> : null}
       </section>
 
+      {calibrationSuggestions.length > 0 ? (
+        <section className="card">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-[0.3em] text-ink/45">Calibration</p>
+              <h2 className="mt-1 text-xl font-semibold">Provider learning suggestions</h2>
+            </div>
+            <span className="rounded-full bg-panel-mid px-3 py-1 text-xs font-semibold text-ink/70">
+              {calibrationSuggestions.length} pending
+            </span>
+          </div>
+          <div className="mt-4 grid gap-3">
+            {calibrationSuggestions.map((suggestion) => (
+              <article className="rounded-2xl border border-rim bg-panel p-4" key={suggestion.id}>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold">
+                      {movementMap.get(suggestion.movement_key) ?? suggestion.movement_key}
+                    </p>
+                    <p className="mt-1 text-sm text-ink/65">{suggestion.threshold_key}</p>
+                  </div>
+                  <div className="text-right text-sm">
+                    <p className="font-semibold">
+                      {suggestion.current_value} {"->"} {suggestion.suggested_value}
+                    </p>
+                    <p className="text-xs text-ink/50">
+                      {suggestion.disagreement_count} disagreements
+                    </p>
+                  </div>
+                </div>
+                <p className="mt-3 text-sm text-ink/70">{suggestion.rationale}</p>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button
+                    className="button-primary py-2 text-sm"
+                    onClick={() => void handleApproveSuggestion(suggestion)}
+                    type="button"
+                  >
+                    Approve threshold
+                  </button>
+                  <button
+                    className="button-secondary py-2 text-sm"
+                    onClick={() => void handleRejectSuggestion(suggestion)}
+                    type="button"
+                  >
+                    Reject
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       <section className="grid gap-3">
         {assessment.movement_results.map((result) => {
-          const draft = getDraft(result.movement_key, result.final_score);
+          const draft = getDraft(result.movement_key, result.effective_final_score);
           const checks = MOVEMENT_CHECKS[result.movement_key] ?? [];
           const movementThresholds = thresholds[result.movement_key] ?? {};
           const isReviewed = result.review_status === "reviewed";
           const hasOverride =
             isReviewed &&
-            result.provider_score !== null &&
-            result.provider_score !== result.final_score;
+            result.provider_final_score !== null &&
+            result.provider_final_score !== result.final_score;
+          const appScoreLabel = result.app_score_available ? `${result.final_score}/3` : "Not run";
+          const visibleFaults = result.provider_faults?.summary?.length
+            ? result.provider_faults.summary
+            : result.detected_faults.summary ?? [];
 
           return (
             <article className="card" key={result.movement_key}>
@@ -221,7 +329,7 @@ export function AssessmentResultsPage() {
                     {isReviewed ? "Reviewed" : "Unreviewed"}
                   </span>
                   <div className="rounded-full bg-mist px-4 py-2 text-sm font-semibold text-accent">
-                    {result.final_score}/3
+                    {result.effective_final_score}/3
                   </div>
                 </div>
               </div>
@@ -230,8 +338,8 @@ export function AssessmentResultsPage() {
               {hasOverride ? (
                 <div className="mt-3 rounded-2xl bg-amber-500/20 px-4 py-3 text-sm">
                   <span className="font-semibold text-amber-300">Provider override: </span>
-                  <span className="text-amber-200">{result.provider_score}/3</span>
-                  <span className="ml-2 text-ink/50">(app: {result.final_score}/3)</span>
+                  <span className="text-amber-200">{result.provider_final_score}/3</span>
+                  <span className="ml-2 text-ink/50">(app: {appScoreLabel})</span>
                   {result.provider_note ? (
                     <p className="mt-1 italic text-ink/70">"{result.provider_note}"</p>
                   ) : null}
@@ -241,19 +349,25 @@ export function AssessmentResultsPage() {
               {/* Side scores */}
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 <div className="rounded-2xl bg-panel p-4">
-                  <p className="text-xs uppercase tracking-[0.25em] text-ink/45">Right</p>
-                  <p className="mt-2 text-2xl font-semibold">{result.right_score ?? "—"}</p>
+                  <p className="text-xs uppercase tracking-[0.25em] text-ink/45">Right effective</p>
+                  <p className="mt-2 text-2xl font-semibold">{result.effective_right_score ?? "-"}</p>
+                  <p className="mt-1 text-xs text-ink/50">
+                    App: {result.app_score_available ? result.right_score ?? "-" : "Not run"}
+                  </p>
                 </div>
                 <div className="rounded-2xl bg-panel p-4">
-                  <p className="text-xs uppercase tracking-[0.25em] text-ink/45">Left</p>
-                  <p className="mt-2 text-2xl font-semibold">{result.left_score ?? "—"}</p>
+                  <p className="text-xs uppercase tracking-[0.25em] text-ink/45">Left effective</p>
+                  <p className="mt-2 text-2xl font-semibold">{result.effective_left_score ?? "-"}</p>
+                  <p className="mt-1 text-xs text-ink/50">
+                    App: {result.app_score_available ? result.left_score ?? "-" : "Not run"}
+                  </p>
                 </div>
               </div>
 
               {/* Detected faults */}
               <div className="mt-4 flex flex-wrap gap-2">
-                {result.detected_faults.summary?.length ? (
-                  result.detected_faults.summary.map((fault) => (
+                {visibleFaults.length ? (
+                  visibleFaults.map((fault) => (
                     <span
                       className="rounded-full bg-panel-mid px-3 py-1 text-sm text-ink/70"
                       key={fault}
@@ -322,7 +436,7 @@ export function AssessmentResultsPage() {
                       <button
                         className="button-secondary text-sm"
                         onClick={() =>
-                          setDraft(result.movement_key, { open: true, score: result.final_score, saveError: null })
+                          setDraft(result.movement_key, { open: true, score: result.effective_final_score, saveError: null })
                         }
                         type="button"
                       >

@@ -19,8 +19,12 @@ const apiMocks = vi.hoisted(() => ({
   getThresholds: vi.fn(),
   issueMagicLink: vi.fn(),
   listAssessments: vi.fn(),
+  listCalibrationSuggestions: vi.fn(),
   listDraftCaptures: vi.fn(),
   listMovements: vi.fn(),
+  approveCalibrationSuggestion: vi.fn(),
+  rejectCalibrationSuggestion: vi.fn(),
+  submitManualScore: vi.fn(),
   submitReview: vi.fn(),
   uploadCapture: vi.fn(),
   uploadDraftCapture: vi.fn()
@@ -41,8 +45,12 @@ vi.mock("./lib/api", () => ({
   getThresholds: apiMocks.getThresholds,
   issueMagicLink: apiMocks.issueMagicLink,
   listAssessments: apiMocks.listAssessments,
+  listCalibrationSuggestions: apiMocks.listCalibrationSuggestions,
   listDraftCaptures: apiMocks.listDraftCaptures,
   listMovements: apiMocks.listMovements,
+  approveCalibrationSuggestion: apiMocks.approveCalibrationSuggestion,
+  rejectCalibrationSuggestion: apiMocks.rejectCalibrationSuggestion,
+  submitManualScore: apiMocks.submitManualScore,
   submitReview: apiMocks.submitReview,
   uploadCapture: apiMocks.uploadCapture,
   uploadDraftCapture: apiMocks.uploadDraftCapture
@@ -64,14 +72,19 @@ describe("App", () => {
     apiMocks.getThresholds.mockReset();
     apiMocks.issueMagicLink.mockReset();
     apiMocks.listAssessments.mockReset();
+    apiMocks.listCalibrationSuggestions.mockReset();
     apiMocks.listDraftCaptures.mockReset();
     apiMocks.listMovements.mockReset();
+    apiMocks.approveCalibrationSuggestion.mockReset();
+    apiMocks.rejectCalibrationSuggestion.mockReset();
+    apiMocks.submitManualScore.mockReset();
     apiMocks.submitReview.mockReset();
     apiMocks.uploadCapture.mockReset();
     apiMocks.uploadDraftCapture.mockReset();
     apiMocks.authenticateWithPin.mockResolvedValue(undefined);
     apiMocks.getThresholds.mockResolvedValue({});
     apiMocks.listAssessments.mockResolvedValue([]);
+    apiMocks.listCalibrationSuggestions.mockResolvedValue([]);
     apiMocks.listDraftCaptures.mockResolvedValue([]);
     apiMocks.listMovements.mockResolvedValue([]);
     localStorage.clear();

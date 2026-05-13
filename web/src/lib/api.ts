@@ -1,13 +1,17 @@
 import type {
   AssessmentDetail,
   AssessmentSummary,
+  CalibrationDecisionPayload,
+  CalibrationSuggestion,
   ConsentPayload,
   CaptureResult,
   DraftCapture,
   Employee,
   FinalizePayload,
+  ManualScorePayload,
   MovementDefinition,
   ProviderReviewPayload,
+  ScoringMode,
   SelfMe,
   Side,
   ThresholdsMap
@@ -135,13 +139,17 @@ export function listMovements() {
   return request<MovementDefinition[]>("/api/movements");
 }
 
-export function createAssessment(name: string, consent: ConsentPayload) {
+export function createAssessment(
+  name: string,
+  consent: ConsentPayload,
+  scoringMode: ScoringMode = "ai_assisted"
+) {
   return request<AssessmentDetail>("/api/assessments", {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({ name, consent })
+    body: JSON.stringify({ name, consent, scoring_mode: scoringMode })
   });
 }
 
@@ -302,4 +310,39 @@ export function submitReview(
       body: JSON.stringify(payload)
     }
   );
+}
+
+export function submitManualScore(
+  assessmentId: string,
+  movementKey: string,
+  payload: ManualScorePayload
+) {
+  return request<AssessmentDetail>(
+    `/api/assessments/${assessmentId}/movements/${movementKey}/manual-score`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    }
+  );
+}
+
+export function listCalibrationSuggestions() {
+  return request<CalibrationSuggestion[]>("/api/calibration/suggestions");
+}
+
+export function approveCalibrationSuggestion(payload: CalibrationDecisionPayload) {
+  return request<{ ok: true; thresholds: ThresholdsMap }>("/api/calibration/suggestions/approve", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function rejectCalibrationSuggestion(payload: CalibrationDecisionPayload) {
+  return request<{ ok: true }>("/api/calibration/suggestions/reject", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
 }

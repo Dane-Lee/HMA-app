@@ -6,7 +6,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
-import yaml
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse, Response
 
@@ -14,12 +13,16 @@ from ..repository import AssessmentRepository
 from ..runtime import RuntimeState
 from ..schemas import (
     AssessmentCreateRequest,
+    CalibrationDecisionRequest,
+    CalibrationSuggestionResponse,
     CaptureResponse,
     DraftCaptureResponse,
     FinalizeMovementRequest,
+    ManualScoreRequest,
     MovementDefinitionResponse,
     ProviderReviewRequest,
 )
+from ..services.scoring.calibration import build_calibration_suggestions
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +94,32 @@ def _draft_capture_response(record: dict, request: Request) -> DraftCaptureRespo
     )
 
 
+def _manual_side_payload(
+    payload,
+    side: str,
+    existing_result: dict | None,
+) -> dict | None:
+    if payload is None:
+        return None
+    data = payload.model_dump()
+    data["faults"] = payload.faults
+    if existing_result and existing_result.get("app_score_available"):
+        app_side_score = existing_result.get(f"{side}_score")
+        if data.get("app_score") is None and app_side_score is not None:
+            data["app_score"] = app_side_score
+        if data.get("app_quality") is None:
+            data["app_quality"] = existing_result.get("quality")
+        if data.get("app_source") is None:
+            quality = existing_result.get("quality") or {}
+            data["app_source"] = quality.get("source")
+        if data.get("app_metrics") is None and app_side_score == existing_result.get("final_score"):
+            data["app_metrics"] = existing_result.get("app_metrics")
+    app_quality = data.get("app_quality")
+    if hasattr(app_quality, "model_dump"):
+        data["app_quality"] = app_quality.model_dump()
+    return data
+
+
 def _cleanup_expired_draft_videos(runtime: RuntimeState) -> None:
     now = _now_utc().isoformat()
     expired = runtime.repository.list_expired_draft_videos(now)
@@ -159,8 +188,7 @@ def list_movements(request: Request):
 
 @router.get("/thresholds")
 def get_thresholds(request: Request):
-    path = get_runtime(request).settings.thresholds_path
-    return yaml.safe_load(path.read_text(encoding="utf-8"))
+    return get_runtime(request).scoring_service.thresholds
 
 
 @router.post("/assessments", status_code=status.HTTP_201_CREATED)
@@ -170,6 +198,7 @@ def create_assessment(payload: AssessmentCreateRequest, request: Request):
     repository = runtime.repository
     assessment = repository.create_assessment(
         payload.name,
+        scoring_mode=payload.scoring_mode,
         consent_notice_version=payload.consent.notice_version,
         consent_scope=_consent_scope(payload),
         retention_days=runtime.settings.assessment_retention_days,
@@ -179,6 +208,7 @@ def create_assessment(payload: AssessmentCreateRequest, request: Request):
         assessment_id=assessment["id"],
         metadata={
             "privacy_posture": assessment["privacy_posture"],
+            "scoring_mode": assessment["scoring_mode"],
             "assessment_retention_days": runtime.settings.assessment_retention_days,
         },
     )
@@ -489,6 +519,66 @@ def finalize_movement(
     return runtime.repository.get_assessment(assessment_id)
 
 
+@router.post("/assessments/{assessment_id}/movements/{movement_key}/manual-score")
+def submit_manual_score(
+    assessment_id: str,
+    movement_key: str,
+    payload: ManualScoreRequest,
+    request: Request,
+):
+    runtime = get_runtime(request)
+    _purge_expired_assessments(runtime)
+    assessment = runtime.repository.get_assessment(assessment_id)
+    if assessment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assessment not found.")
+    movement = runtime.catalog.get(movement_key)
+    if movement is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown movement.")
+    if payload.right is None and payload.left is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one manual side score is required.")
+    if payload.right is not None and "right" not in movement["sides"]:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Right side is invalid for this movement.")
+    if payload.left is not None and "left" not in movement["sides"]:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Left side is invalid for this movement.")
+
+    existing_result = next(
+        (
+            result for result in assessment["movement_results"]
+            if result["movement_key"] == movement_key
+        ),
+        None,
+    )
+    right = _manual_side_payload(payload.right, "right", existing_result)
+    left = _manual_side_payload(payload.left, "left", existing_result)
+    saved = runtime.repository.save_manual_scores(
+        assessment_id=assessment_id,
+        movement_key=movement_key,
+        right=right,
+        left=left,
+        provider_note=payload.provider_note,
+        review_reason=payload.review_reason or "manual_entry",
+        accepted_for_learning=payload.accepted_for_learning,
+    )
+    if not saved:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Manual score could not be saved.")
+    runtime.repository.log_audit_event(
+        "manual_score",
+        assessment_id=assessment_id,
+        movement_key=movement_key,
+        metadata={
+            "sides": sorted(
+                side for side, value in (("left", payload.left), ("right", payload.right))
+                if value is not None
+            ),
+            "accepted_for_learning": payload.accepted_for_learning,
+            "has_app_metrics": bool(
+                (right and right.get("app_metrics")) or (left and left.get("app_metrics"))
+            ),
+        },
+    )
+    return runtime.repository.get_assessment(assessment_id)
+
+
 @router.post("/assessments/{assessment_id}/movements/{movement_key}/review")
 def submit_provider_review(
     assessment_id: str,
@@ -505,6 +595,7 @@ def submit_provider_review(
         movement_key=movement_key,
         provider_score=payload.provider_score,
         provider_note=payload.provider_note,
+        review_reason=payload.review_reason,
     )
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Movement result not found.")
@@ -515,3 +606,65 @@ def submit_provider_review(
         metadata={},
     )
     return runtime.repository.get_assessment(assessment_id)
+
+
+@router.get("/calibration/suggestions", response_model=list[CalibrationSuggestionResponse])
+def list_calibration_suggestions(request: Request):
+    runtime = get_runtime(request)
+    entries = runtime.repository.list_learning_entries()
+    return build_calibration_suggestions(entries, runtime.scoring_service.thresholds)
+
+
+@router.post("/calibration/suggestions/approve")
+def approve_calibration_suggestion(payload: CalibrationDecisionRequest, request: Request):
+    runtime = get_runtime(request)
+    current = runtime.scoring_service.thresholds.get(payload.movement_key, {}).get(payload.threshold_key)
+    if current is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown threshold.")
+    runtime.repository.save_threshold_decision(
+        movement_key=payload.movement_key,
+        threshold_key=payload.threshold_key,
+        old_value=float(current),
+        new_value=payload.new_value,
+        status="approved",
+        metadata={
+            "rationale": payload.rationale,
+            **payload.metadata,
+        },
+    )
+    runtime.scoring_service.set_threshold_override(
+        payload.movement_key,
+        payload.threshold_key,
+        payload.new_value,
+    )
+    runtime.repository.log_audit_event(
+        "calibration_threshold_approve",
+        movement_key=payload.movement_key,
+        metadata={"threshold_key": payload.threshold_key},
+    )
+    return {"ok": True, "thresholds": runtime.scoring_service.thresholds}
+
+
+@router.post("/calibration/suggestions/reject")
+def reject_calibration_suggestion(payload: CalibrationDecisionRequest, request: Request):
+    runtime = get_runtime(request)
+    current = runtime.scoring_service.thresholds.get(payload.movement_key, {}).get(payload.threshold_key)
+    if current is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown threshold.")
+    runtime.repository.save_threshold_decision(
+        movement_key=payload.movement_key,
+        threshold_key=payload.threshold_key,
+        old_value=payload.old_value,
+        new_value=payload.new_value,
+        status="rejected",
+        metadata={
+            "rationale": payload.rationale,
+            **payload.metadata,
+        },
+    )
+    runtime.repository.log_audit_event(
+        "calibration_threshold_reject",
+        movement_key=payload.movement_key,
+        metadata={"threshold_key": payload.threshold_key},
+    )
+    return {"ok": True}

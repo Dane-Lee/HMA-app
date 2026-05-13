@@ -14,11 +14,13 @@ const apiMocks = vi.hoisted(() => ({
     metrics: {},
     source: "fallback"
   })),
+  submitManualScore: vi.fn(),
   listDraftCaptures: vi.fn(async () => [] as unknown[]),
   finalizeMovement: vi.fn(async () => ({
     id: "assessment-1",
     name: "Jordan",
     created_at: "2026-04-16T12:00:00Z",
+    scoring_mode: "ai_assisted",
     total_score: 2,
     score_band: "High opportunity for improvement",
     consent_notice_version: "hma-privacy-notice-v1",
@@ -33,11 +35,25 @@ const apiMocks = vi.hoisted(() => ({
         right_score: 2,
         left_score: 2,
         final_score: 2,
+        app_score_available: true,
         detected_faults: {
           right: ["shoulder_drift"],
           left: [],
           summary: ["shoulder_drift"]
-        }
+        },
+        app_metrics: null,
+        provider_score: null,
+        provider_right_score: null,
+        provider_left_score: null,
+        provider_final_score: null,
+        provider_faults: null,
+        provider_note: null,
+        review_reason: null,
+        review_status: "unreviewed",
+        reviewed_at: null,
+        effective_right_score: 2,
+        effective_left_score: 2,
+        effective_final_score: 2
       }
     ]
   }))
@@ -48,6 +64,7 @@ vi.mock("../lib/api", () => ({
     id: "assessment-1",
     name: "Jordan",
     created_at: "2026-04-16T12:00:00Z",
+    scoring_mode: "ai_assisted",
     total_score: 0,
     score_band: "High opportunity for improvement",
     consent_notice_version: "hma-privacy-notice-v1",
@@ -73,6 +90,7 @@ vi.mock("../lib/api", () => ({
     }
   ]),
   uploadCapture: apiMocks.uploadCapture,
+  submitManualScore: apiMocks.submitManualScore,
   listDraftCaptures: apiMocks.listDraftCaptures,
   finalizeMovement: apiMocks.finalizeMovement
 }));
@@ -81,6 +99,7 @@ describe("AssessmentSessionPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     apiMocks.listDraftCaptures.mockResolvedValue([]);
+    apiMocks.submitManualScore.mockReset();
   });
 
   it("analyzes both sides and saves the movement result", async () => {
@@ -170,7 +189,7 @@ describe("AssessmentSessionPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /save movement score/i }));
 
     expect(apiMocks.finalizeMovement).not.toHaveBeenCalled();
-    expect(screen.getByText("Capture and analyze both sides before saving this movement.")).toBeInTheDocument();
+    expect(screen.getByText("Complete a manual score or analyzed capture for each side before saving this movement.")).toBeInTheDocument();
   });
 
   it("loads mobile draft captures and finalizes them", async () => {

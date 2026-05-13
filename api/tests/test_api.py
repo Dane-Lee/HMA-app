@@ -102,6 +102,146 @@ def test_assessment_creation_and_finalize_flow(tmp_path: Path):
     assert finalized["score_band"] == "High opportunity for improvement"
 
 
+def test_manual_score_can_complete_movement_without_ai_capture(tmp_path: Path):
+    settings = build_settings(tmp_path)
+    client = TestClient(create_app(settings))
+    assessment = client.post(
+        "/api/assessments",
+        json={**create_payload("Manual"), "scoring_mode": "manual"},
+    ).json()
+
+    response = client.post(
+        f"/api/assessments/{assessment['id']}/movements/cervical_rotation/manual-score",
+        json={
+            "right": {
+                "score": 3,
+                "faults": [],
+            },
+            "left": {
+                "score": 1,
+                "faults": ["shoulder_drift"],
+                "other_fault": "Provider observed compensation",
+            },
+            "provider_note": "Manual mode because app scoring was unavailable.",
+            "review_reason": "manual_mode",
+            "accepted_for_learning": True,
+        },
+    )
+
+    assert response.status_code == 200
+    updated = response.json()
+    result = updated["movement_results"][0]
+    assert updated["scoring_mode"] == "manual"
+    assert updated["total_score"] == 1
+    assert result["app_score_available"] is False
+    assert result["provider_right_score"] == 3
+    assert result["provider_left_score"] == 1
+    assert result["provider_final_score"] == 1
+    assert result["effective_final_score"] == 1
+    assert result["provider_faults"]["summary"] == ["shoulder_drift"]
+
+    with get_connection(settings.db_path) as connection:
+        entry = connection.execute(
+            "SELECT app_metrics_json, excluded_reason FROM manual_score_entries"
+        ).fetchone()
+    assert entry["app_metrics_json"] is None
+    assert entry["excluded_reason"] == "no_app_metrics"
+
+
+def test_provider_review_score_drives_effective_total(tmp_path: Path):
+    client = TestClient(create_app(build_settings(tmp_path)))
+    assessment = client.post("/api/assessments", json=create_payload("Review")).json()
+    finalize_response = client.post(
+        f"/api/assessments/{assessment['id']}/movements/trunk_rotation/finalize",
+        json={
+            "right": {"score": 3, "detected_faults": []},
+            "left": {"score": 3, "detected_faults": []},
+        },
+    )
+    assert finalize_response.status_code == 200
+    assert finalize_response.json()["total_score"] == 3
+
+    review_response = client.post(
+        f"/api/assessments/{assessment['id']}/movements/trunk_rotation/review",
+        json={"provider_score": 1, "provider_note": "Provider saw compensation."},
+    )
+
+    assert review_response.status_code == 200
+    updated = review_response.json()
+    assert updated["total_score"] == 1
+    result = updated["movement_results"][0]
+    assert result["final_score"] == 3
+    assert result["provider_final_score"] == 1
+    assert result["effective_final_score"] == 1
+
+
+def test_calibration_suggestion_requires_approval_before_threshold_changes(tmp_path: Path):
+    settings = build_settings(tmp_path)
+    client = TestClient(create_app(settings))
+    assessment = client.post("/api/assessments", json=create_payload("Calibrate")).json()
+    quality = {
+        "schema_version": 1,
+        "status": "good",
+        "overlay_available": True,
+        "source": "mediapipe",
+        "sampled_frames": 12,
+        "detection_rate": 1.0,
+        "required_landmark_visibility": {"nose": 0.9},
+        "warnings": [],
+        "width": 640,
+        "height": 480,
+        "fps": 30.0,
+        "duration_seconds": 2.0,
+    }
+    for index in range(20):
+        response = client.post(
+            f"/api/assessments/{assessment['id']}/movements/cervical_rotation/manual-score",
+            json={
+                "right": {
+                    "score": 2,
+                    "faults": ["chin_does_not_clear_clavicle_midline"],
+                    "app_score": 3,
+                    "app_metrics": {
+                        "chin_midline_clearance_ratio": 0.12 + (index * 0.0001)
+                    },
+                    "app_quality": quality,
+                    "app_source": "mediapipe",
+                },
+                "accepted_for_learning": True,
+            },
+        )
+        assert response.status_code == 200
+
+    thresholds_before = client.get("/api/thresholds").json()
+    assert thresholds_before["cervical_rotation"]["chin_midline_clearance_ratio_min"] == 0.11
+
+    suggestions_response = client.get("/api/calibration/suggestions")
+    assert suggestions_response.status_code == 200
+    suggestions = suggestions_response.json()
+    suggestion = next(
+        item for item in suggestions
+        if item["threshold_key"] == "chin_midline_clearance_ratio_min"
+    )
+    assert suggestion["suggested_value"] > 0.11
+
+    thresholds_mid = client.get("/api/thresholds").json()
+    assert thresholds_mid["cervical_rotation"]["chin_midline_clearance_ratio_min"] == 0.11
+
+    approve_response = client.post(
+        "/api/calibration/suggestions/approve",
+        json={
+            "movement_key": suggestion["movement_key"],
+            "threshold_key": suggestion["threshold_key"],
+            "old_value": suggestion["current_value"],
+            "new_value": suggestion["suggested_value"],
+            "rationale": suggestion["rationale"],
+        },
+    )
+    assert approve_response.status_code == 200
+    thresholds_after = client.get("/api/thresholds").json()
+    assert thresholds_after["cervical_rotation"]["chin_midline_clearance_ratio_min"] == suggestion["suggested_value"]
+
+
 def test_temp_uploads_are_deleted(tmp_path: Path):
     settings = build_settings(tmp_path)
     client = TestClient(create_app(settings))

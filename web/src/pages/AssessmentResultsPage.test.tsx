@@ -8,7 +8,10 @@ const apiMocks = vi.hoisted(() => ({
   deleteAssessment: vi.fn(),
   getAssessment: vi.fn(),
   getThresholds: vi.fn(),
+  listCalibrationSuggestions: vi.fn(),
   listMovements: vi.fn(),
+  approveCalibrationSuggestion: vi.fn(),
+  rejectCalibrationSuggestion: vi.fn(),
   submitReview: vi.fn()
 }));
 
@@ -16,7 +19,10 @@ vi.mock("../lib/api", () => ({
   deleteAssessment: apiMocks.deleteAssessment,
   getAssessment: apiMocks.getAssessment,
   getThresholds: apiMocks.getThresholds,
+  listCalibrationSuggestions: apiMocks.listCalibrationSuggestions,
   listMovements: apiMocks.listMovements,
+  approveCalibrationSuggestion: apiMocks.approveCalibrationSuggestion,
+  rejectCalibrationSuggestion: apiMocks.rejectCalibrationSuggestion,
   submitReview: apiMocks.submitReview
 }));
 
@@ -27,6 +33,7 @@ describe("AssessmentResultsPage", () => {
       id: "assessment-1",
       name: "Jordan",
       created_at: "2026-04-16T12:00:00Z",
+      scoring_mode: "ai_assisted",
       total_score: 0,
       score_band: "High opportunity for improvement",
       consent_notice_version: "hma-privacy-notice-v1",
@@ -36,6 +43,7 @@ describe("AssessmentResultsPage", () => {
       movement_results: []
     });
     apiMocks.getThresholds.mockResolvedValue({});
+    apiMocks.listCalibrationSuggestions.mockResolvedValue([]);
     apiMocks.listMovements.mockResolvedValue([]);
     apiMocks.deleteAssessment.mockResolvedValue(undefined);
   });

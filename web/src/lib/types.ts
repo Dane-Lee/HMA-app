@@ -1,4 +1,5 @@
 export type Side = "left" | "right";
+export type ScoringMode = "ai_assisted" | "manual";
 
 export type ConsentPayload = {
   notice_version: string;
@@ -117,15 +118,26 @@ export type MovementResult = {
   app_metrics: Record<string, number> | null;
   pose_trace?: PoseTrace | null;
   quality?: CaptureQuality | null;
+  app_score_available: boolean;
   provider_score: number | null;
+  provider_right_score: number | null;
+  provider_left_score: number | null;
+  provider_final_score: number | null;
+  provider_faults: Record<string, string[]> | null;
   provider_note: string | null;
+  review_reason: string | null;
   review_status: "unreviewed" | "reviewed";
+  reviewed_at: string | null;
+  effective_right_score: number | null;
+  effective_left_score: number | null;
+  effective_final_score: number;
 };
 
 export type AssessmentSummary = {
   id: string;
   name: string;
   created_at: string;
+  scoring_mode: ScoringMode;
   total_score: number;
   score_band: string;
   consent_notice_version: string | null;
@@ -142,6 +154,48 @@ export type AssessmentDetail = AssessmentSummary & {
 export type ProviderReviewPayload = {
   provider_score: number;
   provider_note?: string;
+  review_reason?: string;
+};
+
+export type ManualSideScorePayload = {
+  score: number;
+  faults: string[];
+  other_fault?: string;
+  app_score?: number;
+  app_metrics?: Record<string, number>;
+  app_quality?: CaptureQuality;
+  app_source?: string;
+};
+
+export type ManualScorePayload = {
+  left?: ManualSideScorePayload;
+  right?: ManualSideScorePayload;
+  provider_note?: string;
+  review_reason?: string;
+  accepted_for_learning?: boolean;
+};
+
+export type CalibrationSuggestion = {
+  id: string;
+  movement_key: string;
+  threshold_key: string;
+  metric_key: string;
+  direction: "min" | "max";
+  current_value: number;
+  suggested_value: number;
+  usable_examples: number;
+  disagreement_count: number;
+  selected_fault_count: number;
+  rationale: string;
+};
+
+export type CalibrationDecisionPayload = {
+  movement_key: string;
+  threshold_key: string;
+  old_value: number;
+  new_value: number;
+  rationale?: string;
+  metadata?: Record<string, unknown>;
 };
 
 export type MovementThresholds = Record<string, number>;

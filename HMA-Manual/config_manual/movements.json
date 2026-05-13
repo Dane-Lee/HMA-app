@@ -1,0 +1,57 @@
+[
+  {
+    "key": "cervical_rotation",
+    "label": "Cervical Rotation",
+    "sides": ["right", "left"],
+    "instructions": "Stand tall with your shoulders square to the camera. Turn your head fully toward the side being tested without stepping or shifting your shoulders.",
+    "capture_tips": [
+      "Frame from chest to top of head.",
+      "Use a front-facing angle with the clavicles visible.",
+      "Pause briefly at the end of the turn."
+    ]
+  },
+  {
+    "key": "trunk_rotation",
+    "label": "Trunk Rotation",
+    "sides": ["right", "left"],
+    "instructions": "Stand with feet planted and arms crossed over your chest. Rotate your trunk toward the test side while keeping your lower body quiet.",
+    "capture_tips": [
+      "Frame from hips to top of head.",
+      "Keep both feet visible if possible.",
+      "Pause at end range."
+    ]
+  },
+  {
+    "key": "forward_lunge",
+    "label": "Forward Lunge",
+    "sides": ["right", "left"],
+    "instructions": "Step into a controlled forward lunge on the test side and return to start under control.",
+    "capture_tips": [
+      "Frame from feet to shoulders.",
+      "Use a side-front angle so knee tracking is visible.",
+      "Capture the full step and return."
+    ]
+  },
+  {
+    "key": "single_leg_dip",
+    "label": "Single Leg Dip",
+    "sides": ["right", "left"],
+    "instructions": "Balance on the test leg, perform a shallow dip, and return without touching the other foot down.",
+    "capture_tips": [
+      "Frame from feet to shoulders.",
+      "Keep the stance foot fully visible.",
+      "Use a front-facing angle."
+    ]
+  },
+  {
+    "key": "shoulder_reach_behind_back",
+    "label": "Shoulder Reach Behind Back",
+    "sides": ["right", "left"],
+    "instructions": "Reach one hand over the shoulder and the other behind the back. Test both top-hand configurations.",
+    "capture_tips": [
+      "Frame from hips to top of head.",
+      "Use a rear or slight rear-oblique angle.",
+      "Hold the end position briefly."
+    ]
+  }
+]

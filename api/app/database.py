@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS assessments (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     created_at TEXT NOT NULL,
+    scoring_mode TEXT NOT NULL DEFAULT 'ai_assisted',
     total_score INTEGER NOT NULL DEFAULT 0,
     score_band TEXT NOT NULL DEFAULT 'High opportunity for improvement',
     consent_notice_version TEXT,
@@ -30,6 +31,13 @@ CREATE TABLE IF NOT EXISTS movement_results (
     detected_faults_json TEXT NOT NULL,
     pose_trace_json TEXT,
     quality_json TEXT,
+    app_score_available INTEGER NOT NULL DEFAULT 1,
+    provider_right_score INTEGER,
+    provider_left_score INTEGER,
+    provider_final_score INTEGER,
+    provider_faults_json TEXT,
+    review_reason TEXT,
+    reviewed_at TEXT,
     FOREIGN KEY (assessment_id) REFERENCES assessments(id) ON DELETE CASCADE,
     UNIQUE (assessment_id, movement_key)
 );
@@ -70,6 +78,43 @@ CREATE TABLE IF NOT EXISTS audit_events (
 
 CREATE INDEX IF NOT EXISTS idx_audit_events_assessment
 ON audit_events (assessment_id, created_at);
+
+CREATE TABLE IF NOT EXISTS manual_score_entries (
+    id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    assessment_id TEXT NOT NULL,
+    movement_key TEXT NOT NULL,
+    side TEXT NOT NULL,
+    provider_score INTEGER NOT NULL,
+    provider_faults_json TEXT NOT NULL,
+    provider_other_fault TEXT,
+    provider_note TEXT,
+    review_reason TEXT NOT NULL DEFAULT 'manual_entry',
+    app_score INTEGER,
+    app_metrics_json TEXT,
+    app_quality_json TEXT,
+    app_source TEXT,
+    accepted_for_learning INTEGER NOT NULL DEFAULT 1,
+    excluded_reason TEXT,
+    FOREIGN KEY (assessment_id) REFERENCES assessments(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_manual_score_entries_movement
+ON manual_score_entries (movement_key, side, created_at);
+
+CREATE TABLE IF NOT EXISTS scoring_threshold_decisions (
+    id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    movement_key TEXT NOT NULL,
+    threshold_key TEXT NOT NULL,
+    old_value REAL NOT NULL,
+    new_value REAL NOT NULL,
+    status TEXT NOT NULL,
+    metadata_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE INDEX IF NOT EXISTS idx_scoring_threshold_decisions_lookup
+ON scoring_threshold_decisions (movement_key, threshold_key, status, created_at);
 
 CREATE TABLE IF NOT EXISTS employees (
     id TEXT PRIMARY KEY,
@@ -124,6 +169,7 @@ def get_connection(db_path: Path) -> sqlite3.Connection:
 
 
 ASSESSMENT_MIGRATIONS: list[tuple[str, str]] = [
+    ("scoring_mode", "TEXT NOT NULL DEFAULT 'ai_assisted'"),
     ("consent_notice_version", "TEXT"),
     ("consent_accepted_at", "TEXT"),
     ("consent_scope_json", "TEXT"),
@@ -136,8 +182,15 @@ MOVEMENT_RESULTS_MIGRATIONS: list[tuple[str, str]] = [
     ("app_metrics_json", "TEXT"),
     ("pose_trace_json", "TEXT"),
     ("quality_json", "TEXT"),
+    ("app_score_available", "INTEGER NOT NULL DEFAULT 1"),
     ("provider_score", "INTEGER"),
+    ("provider_right_score", "INTEGER"),
+    ("provider_left_score", "INTEGER"),
+    ("provider_final_score", "INTEGER"),
+    ("provider_faults_json", "TEXT"),
     ("provider_note", "TEXT"),
+    ("review_reason", "TEXT"),
+    ("reviewed_at", "TEXT"),
     ("review_status", "TEXT NOT NULL DEFAULT 'unreviewed'"),
 ]
 

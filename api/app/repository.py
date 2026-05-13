@@ -46,6 +46,7 @@ class AssessmentRepository:
         self,
         name: str,
         *,
+        scoring_mode: str = "ai_assisted",
         consent_notice_version: str,
         consent_scope: dict[str, bool],
         retention_days: int,
@@ -56,6 +57,7 @@ class AssessmentRepository:
             "id": str(uuid4()),
             "name": name,
             "created_at": created_at.isoformat(),
+            "scoring_mode": scoring_mode,
             "total_score": 0,
             "score_band": compute_score_band(0),
             "consent_notice_version": consent_notice_version,
@@ -71,6 +73,7 @@ class AssessmentRepository:
                     id,
                     name,
                     created_at,
+                    scoring_mode,
                     total_score,
                     score_band,
                     consent_notice_version,
@@ -83,6 +86,7 @@ class AssessmentRepository:
                     :id,
                     :name,
                     :created_at,
+                    :scoring_mode,
                     :total_score,
                     :score_band,
                     :consent_notice_version,
@@ -109,7 +113,7 @@ class AssessmentRepository:
         with get_connection(self.db_path) as connection:
             rows = connection.execute(
                 """
-                SELECT id, name, created_at, total_score, score_band,
+                SELECT id, name, created_at, scoring_mode, total_score, score_band,
                        consent_notice_version, consent_accepted_at,
                        privacy_posture, retention_expires_at
                 FROM assessments
@@ -122,7 +126,7 @@ class AssessmentRepository:
         with get_connection(self.db_path) as connection:
             assessment = connection.execute(
                 """
-                SELECT id, name, created_at, total_score, score_band,
+                SELECT id, name, created_at, scoring_mode, total_score, score_band,
                        consent_notice_version, consent_accepted_at, consent_scope_json,
                        privacy_posture, retention_expires_at
                 FROM assessments
@@ -136,7 +140,9 @@ class AssessmentRepository:
                 """
                 SELECT id, assessment_id, movement_key, right_score, left_score, final_score,
                        detected_faults_json, app_metrics_json, pose_trace_json, quality_json,
-                       provider_score, provider_note, review_status
+                       app_score_available, provider_score, provider_right_score, provider_left_score,
+                       provider_final_score, provider_faults_json, provider_note, review_reason,
+                       review_status, reviewed_at
                 FROM movement_results
                 WHERE assessment_id = ?
                 ORDER BY movement_key
@@ -146,16 +152,7 @@ class AssessmentRepository:
         result = dict(assessment)
         consent_scope_json = result.pop("consent_scope_json", None)
         result["consent_scope"] = json.loads(consent_scope_json) if consent_scope_json else None
-        result["movement_results"] = [
-            {
-                **dict(row),
-                "detected_faults": json.loads(row["detected_faults_json"]),
-                "app_metrics": json.loads(row["app_metrics_json"]) if row["app_metrics_json"] else None,
-                "pose_trace": json.loads(row["pose_trace_json"]) if row["pose_trace_json"] else None,
-                "quality": json.loads(row["quality_json"]) if row["quality_json"] else default_capture_quality(),
-            }
-            for row in movement_rows
-        ]
+        result["movement_results"] = [self._movement_result_from_row(row) for row in movement_rows]
         return result
 
     def list_expired_assessments(self, now_iso: str) -> list[dict[str, Any]]:
@@ -231,6 +228,61 @@ class AssessmentRepository:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def _movement_result_from_row(self, row) -> dict[str, Any]:
+        record = dict(row)
+        record["detected_faults"] = json.loads(record.pop("detected_faults_json"))
+        app_metrics_json = record.pop("app_metrics_json", None)
+        pose_trace_json = record.pop("pose_trace_json", None)
+        quality_json = record.pop("quality_json", None)
+        provider_faults_json = record.pop("provider_faults_json", None)
+        record["app_metrics"] = json.loads(app_metrics_json) if app_metrics_json else None
+        record["pose_trace"] = json.loads(pose_trace_json) if pose_trace_json else None
+        record["quality"] = json.loads(quality_json) if quality_json else default_capture_quality()
+        record["app_score_available"] = bool(record.get("app_score_available", 1))
+        record["provider_faults"] = (
+            json.loads(provider_faults_json) if provider_faults_json else None
+        )
+        provider_final_score = record.get("provider_final_score")
+        if provider_final_score is None:
+            provider_final_score = record.get("provider_score")
+        record["effective_right_score"] = (
+            record.get("provider_right_score")
+            if record.get("provider_right_score") is not None
+            else record.get("right_score")
+        )
+        record["effective_left_score"] = (
+            record.get("provider_left_score")
+            if record.get("provider_left_score") is not None
+            else record.get("left_score")
+        )
+        record["effective_final_score"] = (
+            provider_final_score
+            if provider_final_score is not None
+            else record["final_score"]
+        )
+        return record
+
+    def _recalculate_assessment_total(self, connection, assessment_id: str) -> None:
+        total_row = connection.execute(
+            """
+            SELECT COALESCE(SUM(COALESCE(provider_final_score, provider_score, final_score)), 0)
+                   AS total_score
+            FROM movement_results
+            WHERE assessment_id = ?
+            """,
+            (assessment_id,),
+        ).fetchone()
+        total_score = int(total_row["total_score"])
+        score_band = compute_score_band(total_score)
+        connection.execute(
+            """
+            UPDATE assessments
+            SET total_score = ?, score_band = ?
+            WHERE id = ?
+            """,
+            (total_score, score_band, assessment_id),
+        )
+
     def upsert_movement_result(
         self,
         assessment_id: str,
@@ -254,6 +306,7 @@ class AssessmentRepository:
             "app_metrics_json": json.dumps(app_metrics) if app_metrics is not None else None,
             "pose_trace_json": json.dumps(pose_trace) if pose_trace is not None else None,
             "quality_json": json.dumps(quality) if quality is not None else None,
+            "app_score_available": 1,
         }
         with get_connection(self.db_path) as connection:
             connection.execute(
@@ -268,7 +321,8 @@ class AssessmentRepository:
                     detected_faults_json,
                     app_metrics_json,
                     pose_trace_json,
-                    quality_json
+                    quality_json,
+                    app_score_available
                 )
                 VALUES (
                     :id,
@@ -280,7 +334,8 @@ class AssessmentRepository:
                     :detected_faults_json,
                     :app_metrics_json,
                     :pose_trace_json,
-                    :quality_json
+                    :quality_json,
+                    :app_score_available
                 )
                 ON CONFLICT(assessment_id, movement_key)
                 DO UPDATE SET
@@ -290,28 +345,12 @@ class AssessmentRepository:
                     detected_faults_json = excluded.detected_faults_json,
                     app_metrics_json = excluded.app_metrics_json,
                     pose_trace_json = excluded.pose_trace_json,
-                    quality_json = excluded.quality_json
+                    quality_json = excluded.quality_json,
+                    app_score_available = excluded.app_score_available
                 """,
                 record,
             )
-            total_row = connection.execute(
-                """
-                SELECT COALESCE(SUM(final_score), 0) AS total_score
-                FROM movement_results
-                WHERE assessment_id = ?
-                """,
-                (assessment_id,),
-            ).fetchone()
-            total_score = int(total_row["total_score"])
-            score_band = compute_score_band(total_score)
-            connection.execute(
-                """
-                UPDATE assessments
-                SET total_score = ?, score_band = ?
-                WHERE id = ?
-                """,
-                (total_score, score_band, assessment_id),
-            )
+            self._recalculate_assessment_total(connection, assessment_id)
             connection.commit()
         return {
             "id": record["id"],
@@ -324,6 +363,10 @@ class AssessmentRepository:
             "app_metrics": app_metrics,
             "pose_trace": pose_trace,
             "quality": quality,
+            "app_score_available": True,
+            "effective_right_score": right_score,
+            "effective_left_score": left_score,
+            "effective_final_score": final_score,
         }
 
     def save_provider_review(
@@ -332,18 +375,386 @@ class AssessmentRepository:
         movement_key: str,
         provider_score: int,
         provider_note: str | None,
+        review_reason: str = "provider_review",
     ) -> bool:
+        reviewed_at = datetime.now(timezone.utc).isoformat()
         with get_connection(self.db_path) as connection:
             cursor = connection.execute(
                 """
                 UPDATE movement_results
-                SET provider_score = ?, provider_note = ?, review_status = 'reviewed'
+                SET provider_score = ?,
+                    provider_final_score = ?,
+                    provider_note = ?,
+                    review_reason = ?,
+                    reviewed_at = ?,
+                    review_status = 'reviewed'
                 WHERE assessment_id = ? AND movement_key = ?
                 """,
-                (provider_score, provider_note, assessment_id, movement_key),
+                (
+                    provider_score,
+                    provider_score,
+                    provider_note,
+                    review_reason,
+                    reviewed_at,
+                    assessment_id,
+                    movement_key,
+                ),
             )
+            if cursor.rowcount:
+                self._recalculate_assessment_total(connection, assessment_id)
             connection.commit()
         return cursor.rowcount > 0
+
+    def save_manual_scores(
+        self,
+        *,
+        assessment_id: str,
+        movement_key: str,
+        right: dict[str, Any] | None,
+        left: dict[str, Any] | None,
+        provider_note: str | None,
+        review_reason: str,
+        accepted_for_learning: bool,
+    ) -> bool:
+        if right is None and left is None:
+            return False
+
+        reviewed_at = datetime.now(timezone.utc).isoformat()
+        existing = self.get_assessment(assessment_id)
+        existing_result = None
+        if existing is not None:
+            existing_result = next(
+                (
+                    result for result in existing["movement_results"]
+                    if result["movement_key"] == movement_key
+                ),
+                None,
+            )
+        movement_exists = existing_result is not None
+        right_effective = (
+            right["score"] if right is not None
+            else None if existing_result is None
+            else existing_result.get("provider_right_score")
+            if existing_result.get("provider_right_score") is not None
+            else existing_result.get("right_score")
+        )
+        left_effective = (
+            left["score"] if left is not None
+            else None if existing_result is None
+            else existing_result.get("provider_left_score")
+            if existing_result.get("provider_left_score") is not None
+            else existing_result.get("left_score")
+        )
+        effective_scores = [
+            score for score in (right_effective, left_effective)
+            if score is not None
+        ]
+        provider_final_score = min(effective_scores)
+        existing_provider_faults = (
+            existing_result.get("provider_faults") if existing_result else None
+        ) or {}
+        right_faults = (
+            right["faults"] if right is not None
+            else existing_provider_faults.get("right", [])
+        )
+        left_faults = (
+            left["faults"] if left is not None
+            else existing_provider_faults.get("left", [])
+        )
+        provider_faults = {
+            "right": right_faults,
+            "left": left_faults,
+            "summary": sorted({*right_faults, *left_faults}),
+        }
+
+        with get_connection(self.db_path) as connection:
+            if movement_exists:
+                connection.execute(
+                    """
+                    UPDATE movement_results
+                    SET provider_right_score = COALESCE(?, provider_right_score),
+                        provider_left_score = COALESCE(?, provider_left_score),
+                        provider_final_score = ?,
+                        provider_score = ?,
+                        provider_faults_json = ?,
+                        provider_note = ?,
+                        review_reason = ?,
+                        reviewed_at = ?,
+                        review_status = 'reviewed'
+                    WHERE assessment_id = ? AND movement_key = ?
+                    """,
+                    (
+                        None if right is None else right["score"],
+                        None if left is None else left["score"],
+                        provider_final_score,
+                        provider_final_score,
+                        json.dumps(provider_faults),
+                        provider_note,
+                        review_reason,
+                        reviewed_at,
+                        assessment_id,
+                        movement_key,
+                    ),
+                )
+            else:
+                connection.execute(
+                    """
+                    INSERT INTO movement_results (
+                        id,
+                        assessment_id,
+                        movement_key,
+                        right_score,
+                        left_score,
+                        final_score,
+                        detected_faults_json,
+                        app_score_available,
+                        provider_right_score,
+                        provider_left_score,
+                        provider_final_score,
+                        provider_score,
+                        provider_faults_json,
+                        provider_note,
+                        review_reason,
+                        reviewed_at,
+                        review_status
+                    )
+                    VALUES (
+                        :id,
+                        :assessment_id,
+                        :movement_key,
+                        :right_score,
+                        :left_score,
+                        :final_score,
+                        :detected_faults_json,
+                        :app_score_available,
+                        :provider_right_score,
+                        :provider_left_score,
+                        :provider_final_score,
+                        :provider_score,
+                        :provider_faults_json,
+                        :provider_note,
+                        :review_reason,
+                        :reviewed_at,
+                        'reviewed'
+                    )
+                    """,
+                    {
+                        "id": str(uuid4()),
+                        "assessment_id": assessment_id,
+                        "movement_key": movement_key,
+                        "right_score": None if right is None else right["score"],
+                        "left_score": None if left is None else left["score"],
+                        "final_score": provider_final_score,
+                        "detected_faults_json": json.dumps(provider_faults),
+                        "app_score_available": 0,
+                        "provider_right_score": None if right is None else right["score"],
+                        "provider_left_score": None if left is None else left["score"],
+                        "provider_final_score": provider_final_score,
+                        "provider_score": provider_final_score,
+                        "provider_faults_json": json.dumps(provider_faults),
+                        "provider_note": provider_note,
+                        "review_reason": review_reason,
+                        "reviewed_at": reviewed_at,
+                    },
+                )
+
+            for side_name, side_payload in (("right", right), ("left", left)):
+                if side_payload is None:
+                    continue
+                app_metrics = side_payload.get("app_metrics")
+                excluded_reason = None
+                accepted = bool(accepted_for_learning)
+                if not app_metrics:
+                    accepted = False
+                    excluded_reason = "no_app_metrics"
+                self._insert_manual_score_entry(
+                    connection,
+                    assessment_id=assessment_id,
+                    movement_key=movement_key,
+                    side=side_name,
+                    provider_score=side_payload["score"],
+                    provider_faults=side_payload["faults"],
+                    provider_other_fault=side_payload.get("other_fault"),
+                    provider_note=provider_note,
+                    review_reason=review_reason,
+                    app_score=side_payload.get("app_score"),
+                    app_metrics=app_metrics,
+                    app_quality=side_payload.get("app_quality"),
+                    app_source=side_payload.get("app_source"),
+                    accepted_for_learning=accepted,
+                    excluded_reason=excluded_reason,
+                )
+            self._recalculate_assessment_total(connection, assessment_id)
+            connection.commit()
+        return True
+
+    def _insert_manual_score_entry(
+        self,
+        connection,
+        *,
+        assessment_id: str,
+        movement_key: str,
+        side: str,
+        provider_score: int,
+        provider_faults: list[str],
+        provider_other_fault: str | None,
+        provider_note: str | None,
+        review_reason: str,
+        app_score: int | None,
+        app_metrics: dict[str, Any] | None,
+        app_quality: dict[str, Any] | None,
+        app_source: str | None,
+        accepted_for_learning: bool,
+        excluded_reason: str | None,
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO manual_score_entries (
+                id,
+                created_at,
+                assessment_id,
+                movement_key,
+                side,
+                provider_score,
+                provider_faults_json,
+                provider_other_fault,
+                provider_note,
+                review_reason,
+                app_score,
+                app_metrics_json,
+                app_quality_json,
+                app_source,
+                accepted_for_learning,
+                excluded_reason
+            )
+            VALUES (
+                :id,
+                :created_at,
+                :assessment_id,
+                :movement_key,
+                :side,
+                :provider_score,
+                :provider_faults_json,
+                :provider_other_fault,
+                :provider_note,
+                :review_reason,
+                :app_score,
+                :app_metrics_json,
+                :app_quality_json,
+                :app_source,
+                :accepted_for_learning,
+                :excluded_reason
+            )
+            """,
+            {
+                "id": str(uuid4()),
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "assessment_id": assessment_id,
+                "movement_key": movement_key,
+                "side": side,
+                "provider_score": provider_score,
+                "provider_faults_json": json.dumps(provider_faults),
+                "provider_other_fault": provider_other_fault,
+                "provider_note": provider_note,
+                "review_reason": review_reason,
+                "app_score": app_score,
+                "app_metrics_json": json.dumps(app_metrics) if app_metrics else None,
+                "app_quality_json": json.dumps(app_quality) if app_quality else None,
+                "app_source": app_source,
+                "accepted_for_learning": 1 if accepted_for_learning else 0,
+                "excluded_reason": excluded_reason,
+            },
+        )
+
+    def list_learning_entries(self) -> list[dict[str, Any]]:
+        with get_connection(self.db_path) as connection:
+            rows = connection.execute(
+                """
+                SELECT id, created_at, assessment_id, movement_key, side,
+                       provider_score, provider_faults_json, provider_other_fault,
+                       review_reason, app_score, app_metrics_json, app_quality_json,
+                       app_source, accepted_for_learning, excluded_reason
+                FROM manual_score_entries
+                WHERE accepted_for_learning = 1
+                  AND app_metrics_json IS NOT NULL
+                ORDER BY datetime(created_at) ASC
+                """
+            ).fetchall()
+        entries: list[dict[str, Any]] = []
+        for row in rows:
+            record = dict(row)
+            record["provider_faults"] = json.loads(record.pop("provider_faults_json"))
+            record["app_metrics"] = json.loads(record.pop("app_metrics_json"))
+            app_quality_json = record.pop("app_quality_json", None)
+            record["app_quality"] = json.loads(app_quality_json) if app_quality_json else None
+            record["accepted_for_learning"] = bool(record["accepted_for_learning"])
+            entries.append(record)
+        return entries
+
+    def get_active_threshold_overrides(self) -> dict[str, dict[str, float]]:
+        with get_connection(self.db_path) as connection:
+            rows = connection.execute(
+                """
+                SELECT movement_key, threshold_key, new_value
+                FROM scoring_threshold_decisions
+                WHERE status = 'approved'
+                ORDER BY datetime(created_at) ASC
+                """
+            ).fetchall()
+        overrides: dict[str, dict[str, float]] = {}
+        for row in rows:
+            movement = overrides.setdefault(row["movement_key"], {})
+            movement[row["threshold_key"]] = float(row["new_value"])
+        return overrides
+
+    def save_threshold_decision(
+        self,
+        *,
+        movement_key: str,
+        threshold_key: str,
+        old_value: float,
+        new_value: float,
+        status: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        record = {
+            "id": str(uuid4()),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "movement_key": movement_key,
+            "threshold_key": threshold_key,
+            "old_value": old_value,
+            "new_value": new_value,
+            "status": status,
+            "metadata_json": json.dumps(metadata or {}, sort_keys=True),
+        }
+        with get_connection(self.db_path) as connection:
+            connection.execute(
+                """
+                INSERT INTO scoring_threshold_decisions (
+                    id,
+                    created_at,
+                    movement_key,
+                    threshold_key,
+                    old_value,
+                    new_value,
+                    status,
+                    metadata_json
+                )
+                VALUES (
+                    :id,
+                    :created_at,
+                    :movement_key,
+                    :threshold_key,
+                    :old_value,
+                    :new_value,
+                    :status,
+                    :metadata_json
+                )
+                """,
+                record,
+            )
+            connection.commit()
+        return record
 
     def get_draft_capture_by_client_id(
         self,

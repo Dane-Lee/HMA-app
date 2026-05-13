@@ -1,0 +1,15 @@
+services:
+  hma-manual:
+    build:
+      context: .
+      dockerfile: Dockerfile.manual
+    ports:
+      - "8003:8003"
+    volumes:
+      - hma_manual_data:/app/data/manual
+    env_file:
+      - .env.manual
+    restart: unless-stopped
+
+volumes:
+  hma_manual_data:

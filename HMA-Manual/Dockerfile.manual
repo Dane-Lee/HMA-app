@@ -1,0 +1,25 @@
+# Stage 1: build the HMA-Manual React frontend
+FROM node:20-slim AS web-builder
+WORKDIR /web_manual
+COPY web_manual/package*.json ./
+RUN npm ci
+COPY web_manual/ ./
+RUN npm run build
+
+# Stage 2: Python API + built frontend
+FROM python:3.11-slim AS runtime
+WORKDIR /app
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+COPY api_manual/requirements.txt ./api_manual/
+RUN pip install --no-cache-dir -r api_manual/requirements.txt
+
+COPY api_manual/ api_manual/
+COPY config_manual/ config_manual/
+COPY --from=web-builder /web_manual/dist web_manual/dist
+
+EXPOSE 8003
+
+CMD ["uvicorn", "api_manual.app.main:app", "--host", "0.0.0.0", "--port", "8003"]

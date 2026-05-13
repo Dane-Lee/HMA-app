@@ -16,9 +16,25 @@ Mobile-first ATI Human Movement Assessment MVP for on-site use. The app captures
 /config
 /data
 /web
+/HMA-Manual
+  /api_manual
+  /config_manual
+  /data/manual
+  /web_manual
 Dockerfile
 docker-compose.yml
 ```
+
+## HMA-Manual Sister App
+
+HMA-Manual is isolated under [`HMA-Manual/`](HMA-Manual/). Open that folder in
+VS Code when you want to work strictly on the manual-scoring sister app without
+touching the original HMA folders. It uses separate backend/frontend folders and
+separate data under `HMA-Manual/data/manual`.
+
+The manual app does not call the original movement-recognition pipeline. Review
+videos are temporary files for provider review only. See
+[`HMA-Manual/README.md`](HMA-Manual/README.md) for startup and deployment notes.
 
 ## Local Developer Workflow
 

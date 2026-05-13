@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
 
 Side = Literal["left", "right"]
+ScoringMode = Literal["ai_assisted", "manual"]
 
 
 class PoseLandmarkResponse(BaseModel):
@@ -69,6 +70,7 @@ class ConsentRequest(BaseModel):
 class AssessmentCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     consent: ConsentRequest
+    scoring_mode: ScoringMode = "ai_assisted"
 
     @field_validator("name")
     @classmethod
@@ -128,15 +130,26 @@ class MovementResultResponse(BaseModel):
     app_metrics: dict[str, float] | None = None
     pose_trace: PoseTraceResponse | None = None
     quality: CaptureQualityResponse | None = None
+    app_score_available: bool = True
     provider_score: int | None = None
+    provider_right_score: int | None = None
+    provider_left_score: int | None = None
+    provider_final_score: int | None = None
+    provider_faults: dict[str, list[str]] | None = None
     provider_note: str | None = None
+    review_reason: str | None = None
     review_status: str = "unreviewed"
+    reviewed_at: datetime | None = None
+    effective_right_score: int | None = None
+    effective_left_score: int | None = None
+    effective_final_score: int
 
 
 class AssessmentSummaryResponse(BaseModel):
     id: str
     name: str
     created_at: datetime
+    scoring_mode: ScoringMode = "ai_assisted"
     total_score: int
     score_band: str
     consent_notice_version: str | None = None
@@ -161,3 +174,80 @@ class MovementDefinitionResponse(BaseModel):
 class ProviderReviewRequest(BaseModel):
     provider_score: int = Field(ge=0, le=3)
     provider_note: str | None = None
+    review_reason: str = "provider_review"
+
+
+class ManualSideScorePayload(BaseModel):
+    score: int = Field(ge=0, le=3)
+    faults: list[str] = Field(default_factory=list)
+    other_fault: str | None = Field(default=None, max_length=500)
+    app_score: int | None = Field(default=None, ge=0, le=3)
+    app_metrics: dict[str, float] | None = None
+    app_quality: CaptureQualityResponse | None = None
+    app_source: str | None = Field(default=None, max_length=80)
+
+    @field_validator("faults")
+    @classmethod
+    def normalize_faults(cls, values: list[str]) -> list[str]:
+        normalized: list[str] = []
+        for value in values:
+            fault = value.strip().lower().replace(" ", "_")
+            if not fault:
+                continue
+            if len(fault) > 120:
+                raise ValueError("fault labels must be 120 characters or fewer")
+            normalized.append(fault)
+        return sorted(set(normalized))
+
+    @field_validator("other_fault")
+    @classmethod
+    def normalize_other_fault(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+
+class ManualScoreRequest(BaseModel):
+    right: ManualSideScorePayload | None = None
+    left: ManualSideScorePayload | None = None
+    provider_note: str | None = Field(default=None, max_length=2000)
+    review_reason: str = Field(default="manual_entry", max_length=80)
+    accepted_for_learning: bool = True
+
+    @field_validator("provider_note")
+    @classmethod
+    def normalize_provider_note(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @field_validator("review_reason")
+    @classmethod
+    def normalize_review_reason(cls, value: str) -> str:
+        normalized = value.strip()
+        return normalized or "manual_entry"
+
+
+class CalibrationSuggestionResponse(BaseModel):
+    id: str
+    movement_key: str
+    threshold_key: str
+    metric_key: str
+    direction: Literal["min", "max"]
+    current_value: float
+    suggested_value: float
+    usable_examples: int
+    disagreement_count: int
+    selected_fault_count: int
+    rationale: str
+
+
+class CalibrationDecisionRequest(BaseModel):
+    movement_key: str = Field(min_length=1, max_length=120)
+    threshold_key: str = Field(min_length=1, max_length=120)
+    old_value: float
+    new_value: float
+    rationale: str | None = Field(default=None, max_length=1000)
+    metadata: dict[str, Any] = Field(default_factory=dict)
